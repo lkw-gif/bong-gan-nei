@@ -36,6 +36,8 @@ import { Progress } from '@/components/ui/progress';
 type ToolMode = 'compress' | 'convert' | 'qr';
 type PresetKey = 'clear' | 'balanced' | 'smallest';
 type FileStatus = 'ready' | 'processing' | 'done' | 'error';
+type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg' | 'jpc' | 'png';
+type ConversionTarget = 'webp' | 'jpeg' | 'jpg' | 'png' | 'transparent-png';
 
 type QueueItem = {
   id: string;
@@ -84,6 +86,47 @@ const presets = {
 
 const supportedImageTypes = new Set(['image/jpeg', 'image/png', 'image/webp']);
 
+const conversionSourceOptions: Array<{
+  value: ConversionSource;
+  label: string;
+  accept: string;
+}> = [
+  {
+    value: 'auto',
+    label: '自動偵測',
+    accept: '.webp,.heic,.heif,.jpeg,.jpg,.jpc,.j2c,.jp2,.png',
+  },
+  { value: 'webp', label: 'WebP', accept: '.webp,image/webp' },
+  {
+    value: 'heic',
+    label: 'HEIC / HEIF',
+    accept: '.heic,.heif,image/heic,image/heif',
+  },
+  { value: 'jpeg', label: 'JPEG / JPG', accept: '.jpeg,.jpg,image/jpeg' },
+  {
+    value: 'jpc',
+    label: 'JPC（JPEG 2000）',
+    accept: '.jpc,.j2c,.jp2,image/jp2',
+  },
+  { value: 'png', label: 'PNG', accept: '.png,image/png' },
+];
+
+const conversionTargetOptions: Array<{
+  value: ConversionTarget;
+  label: string;
+  description: string;
+}> = [
+  { value: 'webp', label: 'WebP', description: '容量較細，適合網頁' },
+  { value: 'jpeg', label: 'JPEG', description: '相片通用格式' },
+  { value: 'jpg', label: 'JPG', description: '與 JPEG 內容相同' },
+  { value: 'png', label: 'PNG', description: '保留原本背景' },
+  {
+    value: 'transparent-png',
+    label: '透明 PNG',
+    description: '自動移除邊緣背景',
+  },
+];
+
 function formatBytes(bytes: number) {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
@@ -106,6 +149,45 @@ function isJpegFile(file: File) {
   );
 }
 
+function isHeicFile(file: File) {
+  const extension = extensionOf(file.name);
+  return (
+    file.type === 'image/heic' ||
+    file.type === 'image/heif' ||
+    extension === 'heic' ||
+    extension === 'heif'
+  );
+}
+
+function isJpcFile(file: File) {
+  const extension = extensionOf(file.name);
+  return (
+    file.type === 'image/jp2' ||
+    ['jpc', 'j2c', 'jp2', 'jpx'].includes(extension)
+  );
+}
+
+function isSupportedConversionFile(file: File) {
+  return (
+    isJpegFile(file) ||
+    isHeicFile(file) ||
+    isJpcFile(file) ||
+    supportedImageTypes.has(file.type) ||
+    extensionOf(file.name) === 'png' ||
+    extensionOf(file.name) === 'webp'
+  );
+}
+
+function matchesConversionSource(file: File, source: ConversionSource) {
+  if (source === 'auto') return isSupportedConversionFile(file);
+  if (source === 'webp')
+    return file.type === 'image/webp' || extensionOf(file.name) === 'webp';
+  if (source === 'heic') return isHeicFile(file);
+  if (source === 'jpeg') return isJpegFile(file);
+  if (source === 'jpc') return isJpcFile(file);
+  return file.type === 'image/png' || extensionOf(file.name) === 'png';
+}
+
 function isPdfFile(file: File) {
   return file.type === 'application/pdf' || extensionOf(file.name) === 'pdf';
 }
@@ -126,6 +208,140 @@ async function canvasToBlob(
       quality,
     );
   });
+}
+
+async function imageBitmapFromFile(file: File) {
+  if (isHeicFile(file)) {
+    const { default: heic2any } = await import('heic2any');
+    const converted = await heic2any({ blob: file, toType: 'image/png' });
+    const pngBlob = Array.isArray(converted) ? converted[0] : converted;
+    return createImageBitmap(pngBlob as Blob, {
+      imageOrientation: 'from-image',
+    });
+  }
+
+  return createImageBitmap(file, { imageOrientation: 'from-image' });
+}
+
+async function canvasFromJpc(file: File) {
+  const { decode } = await import('@abasb75/jpeg2000-decoder');
+  const decoded = await decode(await file.arrayBuffer());
+  const { width, height, componentCount, bitsPerSample } = decoded.frameInfo;
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('你的瀏覽器未能處理這份 JPC');
+
+  const imageData = context.createImageData(width, height);
+  const raw = decoded.decodedBuffer as unknown;
+  const bytes =
+    raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBufferLike);
+  const words = raw instanceof Uint16Array ? raw : undefined;
+  const maxSample = bitsPerSample > 8 ? 2 ** bitsPerSample - 1 : 255;
+  const readSample = (index: number) => {
+    const sample = words ? words[index] : bytes[index];
+    return Math.max(0, Math.min(255, Math.round((sample / maxSample) * 255)));
+  };
+
+  for (let pixel = 0; pixel < width * height; pixel += 1) {
+    const sourceIndex = pixel * componentCount;
+    const targetIndex = pixel * 4;
+    if (componentCount === 1) {
+      const gray = readSample(sourceIndex);
+      imageData.data[targetIndex] = gray;
+      imageData.data[targetIndex + 1] = gray;
+      imageData.data[targetIndex + 2] = gray;
+      imageData.data[targetIndex + 3] = 255;
+    } else {
+      imageData.data[targetIndex] = readSample(sourceIndex);
+      imageData.data[targetIndex + 1] = readSample(sourceIndex + 1);
+      imageData.data[targetIndex + 2] = readSample(sourceIndex + 2);
+      imageData.data[targetIndex + 3] =
+        componentCount > 3 ? readSample(sourceIndex + 3) : 255;
+    }
+  }
+
+  context.putImageData(imageData, 0, 0);
+  return canvas;
+}
+
+function removeBackgroundFromCanvas(canvas: HTMLCanvasElement) {
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('你的瀏覽器未能建立透明圖層');
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const { data, width, height } = imageData;
+  const cornerColors = [
+    [data[0], data[1], data[2]],
+    [
+      data[(width - 1) * 4],
+      data[(width - 1) * 4 + 1],
+      data[(width - 1) * 4 + 2],
+    ],
+    [
+      data[(height - 1) * width * 4],
+      data[(height - 1) * width * 4 + 1],
+      data[(height - 1) * width * 4 + 2],
+    ],
+    [
+      data[(height * width - 1) * 4],
+      data[(height * width - 1) * 4 + 1],
+      data[(height * width - 1) * 4 + 2],
+    ],
+  ];
+  const background = [
+    Math.round(
+      cornerColors.reduce((sum, color) => sum + color[0], 0) /
+        cornerColors.length,
+    ),
+    Math.round(
+      cornerColors.reduce((sum, color) => sum + color[1], 0) /
+        cornerColors.length,
+    ),
+    Math.round(
+      cornerColors.reduce((sum, color) => sum + color[2], 0) /
+        cornerColors.length,
+    ),
+  ];
+  const visited = new Uint8Array(width * height);
+  const stack: number[] = [];
+  const tolerance = 58;
+  const colorDistance = (pixel: number) => {
+    const offset = pixel * 4;
+    const dr = data[offset] - background[0];
+    const dg = data[offset + 1] - background[1];
+    const db = data[offset + 2] - background[2];
+    return Math.sqrt(dr * dr + dg * dg + db * db);
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    stack.push(x, (height - 1) * width + x);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    stack.push(y * width, y * width + width - 1);
+  }
+
+  while (stack.length) {
+    const pixel = stack.pop();
+    if (
+      pixel === undefined ||
+      visited[pixel] ||
+      colorDistance(pixel) > tolerance ||
+      data[pixel * 4 + 3] === 0
+    )
+      continue;
+    visited[pixel] = 1;
+    data[pixel * 4 + 3] = 0;
+    const x = pixel % width;
+    const y = Math.floor(pixel / width);
+    if (x > 0) stack.push(pixel - 1);
+    if (x < width - 1) stack.push(pixel + 1);
+    if (y > 0) stack.push(pixel - width);
+    if (y < height - 1) stack.push(pixel + width);
+  }
+
+  context.putImageData(imageData, 0, 0);
+  return canvas;
 }
 
 async function compressImage(
@@ -187,6 +403,55 @@ async function compressImage(
         ? '已轉為 WebP，在保留透明背景的同時縮小容量。'
         : undefined,
   };
+}
+
+async function convertImage(file: File, target: ConversionTarget) {
+  const sourceExtension = extensionOf(file.name);
+  const sourceIsJpeg = isJpegFile(file);
+  const targetExtension = target === 'transparent-png' ? 'png' : target;
+  const outputName = `${nameWithoutExtension(file.name)}.${targetExtension}`;
+
+  if (sourceIsJpeg && (target === 'jpeg' || target === 'jpg')) {
+    return {
+      blob: file,
+      name: outputName,
+      note: `只更改副檔名（${sourceExtension.toUpperCase()} → ${targetExtension.toUpperCase()}），不會重新壓縮。`,
+    };
+  }
+
+  const sourceCanvas = isJpcFile(file)
+    ? await canvasFromJpc(file)
+    : (() => null)();
+  const bitmap = sourceCanvas ? undefined : await imageBitmapFromFile(file);
+  const canvas = sourceCanvas ?? document.createElement('canvas');
+  if (bitmap) {
+    canvas.width = bitmap.width;
+    canvas.height = bitmap.height;
+    const context = canvas.getContext('2d');
+    if (!context) throw new Error('你的瀏覽器未能建立轉換畫布');
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = 'high';
+    context.drawImage(bitmap, 0, 0);
+    bitmap.close();
+  }
+
+  let note: string | undefined;
+  if (target === 'transparent-png') {
+    removeBackgroundFromCanvas(canvas);
+    note = '已按邊緣背景色自動去背；背景複雜的相片可能需要手動修整。';
+  }
+
+  const outputType =
+    target === 'webp'
+      ? 'image/webp'
+      : target === 'png' || target === 'transparent-png'
+        ? 'image/png'
+        : 'image/jpeg';
+  const quality = outputType === 'image/jpeg' ? 0.9 : 0.9;
+  const blob = await canvasToBlob(canvas, outputType, quality);
+  canvas.width = 1;
+  canvas.height = 1;
+  return { blob, name: outputName, note };
 }
 
 async function compressPdf(
@@ -270,6 +535,8 @@ export default function Home() {
   const [mode, setMode] = useState<ToolMode>('compress');
   const [preset, setPreset] = useState<PresetKey>('balanced');
   const [maxLongEdge, setMaxLongEdge] = useState('1920');
+  const [convertFrom, setConvertFrom] = useState<ConversionSource>('auto');
+  const [convertTo, setConvertTo] = useState<ConversionTarget>('webp');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [qrInput, setQrInput] = useState('');
@@ -344,7 +611,7 @@ export default function Home() {
   function addFiles(fileList: FileList | File[]) {
     const incoming = Array.from(fileList);
     const accepted = incoming.filter((file) => {
-      if (mode === 'convert') return isJpegFile(file);
+      if (mode === 'convert') return matchesConversionSource(file, convertFrom);
       return isPdfFile(file) || supportedImageTypes.has(file.type);
     });
 
@@ -385,15 +652,14 @@ export default function Home() {
 
     try {
       if (mode === 'convert') {
-        const currentExtension = extensionOf(item.file.name);
-        const outputExtension = currentExtension === 'jpeg' ? 'jpg' : 'jpeg';
+        const result = await convertImage(item.file, convertTo);
         updateItem(item.id, {
           status: 'done',
           progress: 100,
-          output: item.file,
-          outputName: `${nameWithoutExtension(item.file.name)}.${outputExtension}`,
-          outputSize: item.file.size,
-          note: 'JPEG 和 JPG 是同一種格式，只更改副檔名，不會重新壓縮或降低畫質。',
+          output: result.blob,
+          outputName: result.name,
+          outputSize: result.blob.size,
+          note: result.note,
         });
         return;
       }
@@ -517,8 +783,8 @@ export default function Home() {
               <span className="text-[color:var(--brand)]">傳送快好多。</span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              壓縮相片和 PDF，或者在 .jpeg 與 .jpg
-              之間無損互換。全部在你的裝置內完成，檔案不會離開瀏覽器。
+              壓縮相片和 PDF，互轉 WebP、HEIC、JPEG、JPC、PNG，亦可一鍵生成透明
+              PNG。全部在你的裝置內完成，檔案不會離開瀏覽器。
             </p>
           </div>
           <div className="hidden gap-8 rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] px-6 py-4 lg:flex">
@@ -553,7 +819,7 @@ export default function Home() {
                 className={mode === 'convert' ? 'active' : ''}
                 onClick={() => changeMode('convert')}
               >
-                <RefreshCw aria-hidden="true" /> JPEG ↔ JPG
+                <RefreshCw aria-hidden="true" /> 格式轉換
               </button>
               <button
                 type="button"
@@ -575,14 +841,14 @@ export default function Home() {
                   {mode === 'compress'
                     ? '選擇壓縮程度'
                     : mode === 'convert'
-                      ? '無損更改副檔名'
+                      ? '選擇來源與目標格式'
                       : '輸入網頁網址'}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   {mode === 'compress'
                     ? '先選取畫質與容量的平衡，完成後可逐個下載。'
                     : mode === 'convert'
-                      ? 'JPEG 與 JPG 格式完全相同，所以不用重新編碼。'
+                      ? '先揀「由格式」和「轉做」，再加入相片；所有轉換都在瀏覽器內完成。'
                       : '貼上網址後會即時生成 QR Code，可下載 PNG 圖片。'}
                 </p>
               </div>
@@ -696,18 +962,69 @@ export default function Home() {
                   </div>
                 </>
               ) : (
-                <div className="rounded-2xl border border-[color:var(--brand)]/15 bg-[color:var(--mint)]/45 p-4">
-                  <div className="mb-3 flex size-10 items-center justify-center rounded-xl bg-[color:var(--brand)] text-white">
-                    <RefreshCw className="size-5" aria-hidden="true" />
+                <div className="space-y-4">
+                  <div>
+                    <label
+                      htmlFor="convert-from"
+                      className="mb-2 block text-sm font-semibold"
+                    >
+                      由格式
+                    </label>
+                    <NativeSelect
+                      className="w-full"
+                      id="convert-from"
+                      value={convertFrom}
+                      onChange={(event) => {
+                        setConvertFrom(event.target.value as ConversionSource);
+                        setQueue([]);
+                      }}
+                    >
+                      {conversionSourceOptions.map((option) => (
+                        <NativeSelectOption
+                          key={option.value}
+                          value={option.value}
+                        >
+                          {option.label}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
                   </div>
-                  <p className="font-semibold">.jpeg → .jpg</p>
-                  <p className="my-1 text-center text-xs font-bold text-[color:var(--brand)]">
-                    或
-                  </p>
-                  <p className="font-semibold">.jpg → .jpeg</p>
-                  <p className="mt-3 text-xs leading-5 text-muted-foreground">
-                    只會改檔名結尾，檔案內容、畫質和容量都不變。
-                  </p>
+                  <div>
+                    <label
+                      htmlFor="convert-to"
+                      className="mb-2 block text-sm font-semibold"
+                    >
+                      轉做
+                    </label>
+                    <NativeSelect
+                      className="w-full"
+                      id="convert-to"
+                      value={convertTo}
+                      onChange={(event) =>
+                        setConvertTo(event.target.value as ConversionTarget)
+                      }
+                    >
+                      {conversionTargetOptions.map((option) => (
+                        <NativeSelectOption
+                          key={option.value}
+                          value={option.value}
+                        >
+                          {option.label} · {option.description}
+                        </NativeSelectOption>
+                      ))}
+                    </NativeSelect>
+                  </div>
+                  <div className="rounded-2xl border border-[color:var(--brand)]/15 bg-[color:var(--mint)]/45 p-4">
+                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[color:var(--brand-deep)]">
+                      <RefreshCw className="size-4" aria-hidden="true" />
+                      支援轉換
+                    </div>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      HEIC / HEIF 和 JPC（JPEG
+                      2000）可作來源，輸出為瀏覽器通用格式。選「透明
+                      PNG」會自動按邊緣背景色去背。
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -728,7 +1045,7 @@ export default function Home() {
                     {mode === 'compress'
                       ? '拖放檔案到這裡'
                       : mode === 'convert'
-                        ? '加入 JPEG 或 JPG'
+                        ? `加入 ${conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片'}`
                         : '預覽你的 QR Code'}
                   </h2>
                 </div>
@@ -822,7 +1139,9 @@ export default function Home() {
                     accept={
                       mode === 'compress'
                         ? '.pdf,.jpeg,.jpg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp'
-                        : '.jpeg,.jpg,image/jpeg'
+                        : conversionSourceOptions.find(
+                            (option) => option.value === convertFrom,
+                          )?.accept
                     }
                     onChange={(event) => {
                       if (event.target.files) addFiles(event.target.files);
@@ -846,7 +1165,7 @@ export default function Home() {
                   <p className="mt-4 text-xs text-muted-foreground">
                     {mode === 'compress'
                       ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案'
-                      : '支援 .jpeg 及 .jpg・不會改動畫質或內容'}
+                      : `支援 ${conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片'}・可一次加入多個檔案`}
                   </p>
                 </div>
               )}
