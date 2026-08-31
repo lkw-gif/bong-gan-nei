@@ -1,17 +1,21 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
   Check,
+  CheckCircle2,
   ChevronRight,
+  Copy,
   Download,
   FileArchive,
   FileImage,
   FileText,
+  Globe2,
   Info,
   LoaderCircle,
   LockKeyhole,
+  QrCode,
   RefreshCw,
   ShieldCheck,
   Sparkles,
@@ -22,13 +26,14 @@ import {
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   NativeSelect,
   NativeSelectOption,
 } from '@/components/ui/native-select';
 import { Progress } from '@/components/ui/progress';
 
-type ToolMode = 'compress' | 'convert';
+type ToolMode = 'compress' | 'convert' | 'qr';
 type PresetKey = 'clear' | 'balanced' | 'smallest';
 type FileStatus = 'ready' | 'processing' | 'done' | 'error';
 
@@ -267,7 +272,63 @@ export default function Home() {
   const [maxLongEdge, setMaxLongEdge] = useState('1920');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [dragging, setDragging] = useState(false);
+  const [qrInput, setQrInput] = useState('');
+  const [qrUrl, setQrUrl] = useState('');
+  const [qrDataUrl, setQrDataUrl] = useState('');
+  const [qrError, setQrError] = useState('');
+  const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const trimmed = qrInput.trim();
+    if (!trimmed) {
+      setQrUrl('');
+      setQrDataUrl('');
+      setQrError('');
+      return;
+    }
+
+    let parsed: URL;
+    try {
+      parsed = new URL(
+        /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`,
+      );
+      if (!parsed.hostname || !['http:', 'https:'].includes(parsed.protocol)) {
+        throw new Error('invalid url');
+      }
+    } catch {
+      setQrUrl('');
+      setQrDataUrl('');
+      setQrError('請輸入有效的 http:// 或 https:// 網址。');
+      return;
+    }
+
+    let cancelled = false;
+    setQrError('');
+    setQrUrl(parsed.toString());
+    void import('qrcode')
+      .then((qrcode) =>
+        qrcode.toDataURL(parsed.toString(), {
+          width: 640,
+          margin: 2,
+          errorCorrectionLevel: 'M',
+          color: { dark: '#075b50', light: '#fffef9' },
+        }),
+      )
+      .then((dataUrl) => {
+        if (!cancelled) setQrDataUrl(dataUrl);
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setQrDataUrl('');
+          setQrError('暫時未能生成 QR Code，請再試一次。');
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [qrInput]);
 
   const readyCount = queue.filter((item) => item.status === 'ready').length;
   const doneItems = queue.filter(
@@ -386,6 +447,23 @@ export default function Home() {
     });
   }
 
+  function downloadQr() {
+    if (!qrDataUrl) return;
+    const anchor = document.createElement('a');
+    anchor.href = qrDataUrl;
+    anchor.download = 'qr-code.png';
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }
+
+  async function copyQrUrl() {
+    if (!qrUrl || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(qrUrl);
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  }
+
   return (
     <main className="min-h-screen bg-background text-foreground">
       <header className="border-b border-[color:var(--line)] bg-[color:var(--paper)]/95">
@@ -431,7 +509,7 @@ export default function Home() {
                 <Sparkles data-icon="inline-start" /> 免費・免上傳
               </Badge>
               <span className="text-xs font-medium text-muted-foreground">
-                PDF · JPEG · JPG · PNG · WebP
+                PDF · JPEG · JPG · PNG · WebP · 網頁 QR Code
               </span>
             </div>
             <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] sm:text-5xl lg:text-[58px] lg:leading-[1.02]">
@@ -477,6 +555,15 @@ export default function Home() {
               >
                 <RefreshCw aria-hidden="true" /> JPEG ↔ JPG
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === 'qr'}
+                className={mode === 'qr' ? 'active' : ''}
+                onClick={() => changeMode('qr')}
+              >
+                <QrCode aria-hidden="true" /> 網頁 QR Code
+              </button>
             </div>
           </div>
 
@@ -485,16 +572,69 @@ export default function Home() {
               <div className="mb-6">
                 <p className="eyebrow">01 / 設定</p>
                 <h2 className="mt-2 text-xl font-bold tracking-tight">
-                  {mode === 'compress' ? '選擇壓縮程度' : '無損更改副檔名'}
+                  {mode === 'compress'
+                    ? '選擇壓縮程度'
+                    : mode === 'convert'
+                      ? '無損更改副檔名'
+                      : '輸入網頁網址'}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   {mode === 'compress'
                     ? '先選取畫質與容量的平衡，完成後可逐個下載。'
-                    : 'JPEG 與 JPG 格式完全相同，所以不用重新編碼。'}
+                    : mode === 'convert'
+                      ? 'JPEG 與 JPG 格式完全相同，所以不用重新編碼。'
+                      : '貼上網址後會即時生成 QR Code，可下載 PNG 圖片。'}
                 </p>
               </div>
 
-              {mode === 'compress' ? (
+              {mode === 'qr' ? (
+                <div className="space-y-4">
+                  <label
+                    htmlFor="qr-url"
+                    className="block text-sm font-semibold"
+                  >
+                    網頁網址
+                  </label>
+                  <div className="relative">
+                    <Globe2
+                      className="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <Input
+                      id="qr-url"
+                      type="url"
+                      inputMode="url"
+                      value={qrInput}
+                      onChange={(event) => setQrInput(event.target.value)}
+                      placeholder="例如 https://example.com"
+                      className="h-11 rounded-xl bg-[color:var(--paper)] pl-9 pr-3 text-sm"
+                      aria-invalid={Boolean(qrError)}
+                    />
+                  </div>
+                  {qrError ? (
+                    <p
+                      className="text-xs leading-5 text-destructive"
+                      role="alert"
+                    >
+                      {qrError}
+                    </p>
+                  ) : (
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      未輸入通訊協定時，會自動加上 https://
+                    </p>
+                  )}
+                  <div className="rounded-2xl border border-[color:var(--brand)]/15 bg-[color:var(--mint)]/45 p-4">
+                    <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-[color:var(--brand-deep)]">
+                      <CheckCircle2 className="size-4" aria-hidden="true" />
+                      安全提示
+                    </div>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      QR Code
+                      只會儲存你輸入的網址；生成過程不會讀取或上傳網頁內容。
+                    </p>
+                  </div>
+                </div>
+              ) : mode === 'compress' ? (
                 <>
                   <div
                     className="space-y-2"
@@ -587,7 +727,9 @@ export default function Home() {
                   <h2 className="mt-2 text-xl font-bold tracking-tight">
                     {mode === 'compress'
                       ? '拖放檔案到這裡'
-                      : '加入 JPEG 或 JPG'}
+                      : mode === 'convert'
+                        ? '加入 JPEG 或 JPG'
+                        : '預覽你的 QR Code'}
                   </h2>
                 </div>
                 {queue.length > 0 && (
@@ -601,60 +743,115 @@ export default function Home() {
                 )}
               </div>
 
-              <div
-                className={`drop-zone ${dragging ? 'dragging' : ''}`}
-                onDragEnter={(event) => {
-                  event.preventDefault();
-                  setDragging(true);
-                }}
-                onDragOver={(event) => event.preventDefault()}
-                onDragLeave={(event) => {
-                  event.preventDefault();
-                  if (event.currentTarget === event.target) setDragging(false);
-                }}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  setDragging(false);
-                  addFiles(event.dataTransfer.files);
-                }}
-              >
-                <input
-                  ref={inputRef}
-                  type="file"
-                  className="sr-only"
-                  multiple
-                  accept={
-                    mode === 'compress'
-                      ? '.pdf,.jpeg,.jpg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp'
-                      : '.jpeg,.jpg,image/jpeg'
-                  }
-                  onChange={(event) => {
-                    if (event.target.files) addFiles(event.target.files);
-                    event.target.value = '';
-                  }}
-                />
-                <div className="upload-icon">
-                  <UploadCloud aria-hidden="true" />
+              {mode === 'qr' ? (
+                <div className="qr-workspace">
+                  <div className={`qr-preview ${qrDataUrl ? 'ready' : ''}`}>
+                    {qrDataUrl ? (
+                      <img src={qrDataUrl} alt={`指向 ${qrUrl} 的 QR Code`} />
+                    ) : (
+                      <div className="qr-empty">
+                        <QrCode aria-hidden="true" />
+                        <p>輸入網址後，QR Code 會在這裡出現</p>
+                      </div>
+                    )}
+                  </div>
+                  <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div className="min-w-0">
+                      <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                        目前網址
+                      </p>
+                      <p
+                        className="mt-1 truncate text-sm font-medium"
+                        title={qrUrl}
+                      >
+                        {qrUrl || '等待輸入…'}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!qrUrl}
+                        onClick={copyQrUrl}
+                      >
+                        {copied ? (
+                          <Check data-icon="inline-start" />
+                        ) : (
+                          <Copy data-icon="inline-start" />
+                        )}
+                        {copied ? '已複製' : '複製網址'}
+                      </Button>
+                      <Button
+                        size="sm"
+                        disabled={!qrDataUrl}
+                        onClick={downloadQr}
+                        className="bg-[color:var(--brand)] text-white hover:bg-[color:var(--brand-deep)]"
+                      >
+                        <Download data-icon="inline-start" /> 下載 PNG
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="mt-5 text-xs leading-5 text-muted-foreground">
+                    小提示：下載後可以放到海報、餐牌、名片或簡報，掃描後會開啟上面的網址。
+                  </p>
                 </div>
-                <p className="mt-4 text-base font-bold">
-                  {dragging ? '放手加入檔案' : '將檔案拖到這裡'}
-                </p>
-                <p className="mt-1 text-sm text-muted-foreground">或者</p>
-                <Button
-                  size="lg"
-                  className="mt-4 h-11 rounded-xl bg-[color:var(--brand)] px-5 text-white hover:bg-[color:var(--brand-deep)]"
-                  onClick={() => inputRef.current?.click()}
+              ) : (
+                <div
+                  className={`drop-zone ${dragging ? 'dragging' : ''}`}
+                  onDragEnter={(event) => {
+                    event.preventDefault();
+                    setDragging(true);
+                  }}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDragLeave={(event) => {
+                    event.preventDefault();
+                    if (event.currentTarget === event.target)
+                      setDragging(false);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    setDragging(false);
+                    addFiles(event.dataTransfer.files);
+                  }}
                 >
-                  選擇檔案 <ChevronRight data-icon="inline-end" />
-                </Button>
-                <p className="mt-4 text-xs text-muted-foreground">
-                  {mode === 'compress'
-                    ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案'
-                    : '支援 .jpeg 及 .jpg・不會改動畫質或內容'}
-                </p>
-              </div>
+                  <input
+                    ref={inputRef}
+                    type="file"
+                    className="sr-only"
+                    multiple
+                    accept={
+                      mode === 'compress'
+                        ? '.pdf,.jpeg,.jpg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp'
+                        : '.jpeg,.jpg,image/jpeg'
+                    }
+                    onChange={(event) => {
+                      if (event.target.files) addFiles(event.target.files);
+                      event.target.value = '';
+                    }}
+                  />
+                  <div className="upload-icon">
+                    <UploadCloud aria-hidden="true" />
+                  </div>
+                  <p className="mt-4 text-base font-bold">
+                    {dragging ? '放手加入檔案' : '將檔案拖到這裡'}
+                  </p>
+                  <p className="mt-1 text-sm text-muted-foreground">或者</p>
+                  <Button
+                    size="lg"
+                    className="mt-4 h-11 rounded-xl bg-[color:var(--brand)] px-5 text-white hover:bg-[color:var(--brand-deep)]"
+                    onClick={() => inputRef.current?.click()}
+                  >
+                    選擇檔案 <ChevronRight data-icon="inline-end" />
+                  </Button>
+                  <p className="mt-4 text-xs text-muted-foreground">
+                    {mode === 'compress'
+                      ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案'
+                      : '支援 .jpeg 及 .jpg・不會改動畫質或內容'}
+                  </p>
+                </div>
+              )}
 
-              {queue.length > 0 && (
+              {mode !== 'qr' && queue.length > 0 && (
                 <div className="mt-6" aria-live="polite">
                   <div className="mb-3 flex items-center justify-between">
                     <p className="text-sm font-bold">
