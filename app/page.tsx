@@ -652,10 +652,7 @@ export default function Home() {
               </span>
             </div>
             <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] sm:text-5xl lg:text-[58px] lg:leading-[1.02]">
-              你有壓力我有壓力，
-              <span className="text-[color:var(--brand)]">
-                轉一轉世界更美妙。
-              </span>
+              <span className="text-[color:var(--brand)]">幫緊你幫緊你～</span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
               壓縮相片和 PDF，互轉
