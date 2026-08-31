@@ -14,13 +14,13 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://ya-sai-di.davidlui.chatgpt.site'),
-  title: '壓細啲｜免費 PDF 及圖片壓縮工具',
+  title: '壓細啲｜免費檔案壓縮及格式轉換工具',
   description:
-    '在瀏覽器內壓縮 PDF、JPEG、JPG、PNG、WebP，或無損互換 JPEG 與 JPG 副檔名。檔案不會上傳。',
+    '在瀏覽器內壓縮 PDF 及圖片，互轉 WebP、HEIC、JPEG、JPC、PNG，亦可生成透明 PNG 和網頁 QR Code。檔案不會上傳。',
   openGraph: {
     title: '壓細啲｜檔案細一截，傳送快好多。',
     description:
-      '免費壓縮 PDF 及圖片，並可無損互換 JPEG 與 JPG。全部在瀏覽器內處理。',
+      '免費壓縮 PDF 及圖片，轉換常用格式、生成透明 PNG 和網頁 QR Code。全部在瀏覽器內處理。',
     type: 'website',
     locale: 'zh_HK',
     url: 'https://ya-sai-di.davidlui.chatgpt.site',
@@ -36,7 +36,7 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: '壓細啲｜檔案細一截，傳送快好多。',
-    description: '免費壓縮 PDF 及圖片，檔案不會上傳。',
+    description: '免費壓縮及轉換 PDF、圖片，檔案不會上傳。',
     images: ['/og.png'],
   },
 };
