@@ -645,7 +645,7 @@ export default function Home() {
           <div className="max-w-3xl">
             <div className="mb-4 flex flex-wrap items-center gap-2">
               <Badge className="bg-[color:var(--lime)] text-[color:var(--brand-deep)]">
-                <Sparkles data-icon="inline-start" /> 免費・免上傳
+                <Sparkles data-icon="inline-start" /> 免費
               </Badge>
             </div>
             <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] sm:text-5xl lg:text-[58px] lg:leading-[1.02]">
