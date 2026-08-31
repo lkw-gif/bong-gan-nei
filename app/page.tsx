@@ -775,7 +775,7 @@ export default function Home() {
                 <Sparkles data-icon="inline-start" /> 免費・免上傳
               </Badge>
               <span className="text-xs font-medium text-muted-foreground">
-                PDF · JPEG · JPG · PNG · WebP · 網頁 QR Code
+                PDF · JPEG · JPG · PNG · WebP · HEIC · JPC · 網頁 QR Code
               </span>
             </div>
             <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] sm:text-5xl lg:text-[58px] lg:leading-[1.02]">
