@@ -36,8 +36,8 @@ import { Progress } from '@/components/ui/progress';
 type ToolMode = 'compress' | 'convert' | 'qr';
 type PresetKey = 'clear' | 'balanced' | 'smallest';
 type FileStatus = 'ready' | 'processing' | 'done' | 'error';
-type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg';
-type ConversionTarget = 'jpeg' | 'jpg' | 'heic' | 'webp';
+type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg' | 'word';
+type ConversionTarget = 'jpeg' | 'jpg' | 'heic' | 'webp' | 'pdf';
 
 type QueueItem = {
   id: string;
@@ -103,6 +103,12 @@ const conversionSourceOptions: Array<{
     accept: '.heic,.heif,image/heic,image/heif',
   },
   { value: 'jpeg', label: 'JPEG / JPG', accept: '.jpeg,.jpg,image/jpeg' },
+  {
+    value: 'word',
+    label: 'DOC / DOCX',
+    accept:
+      '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  },
 ];
 
 const conversionTargetOptions: Array<{
@@ -114,6 +120,7 @@ const conversionTargetOptions: Array<{
   { value: 'jpg', label: 'JPG', description: '與 JPEG 內容相同' },
   { value: 'heic', label: 'HEIC', description: '容量較細，適合手機相片' },
   { value: 'webp', label: 'WebP', description: '容量較細，適合網頁' },
+  { value: 'pdf', label: 'PDF', description: '適合列印及分享' },
 ];
 
 function formatBytes(bytes: number) {
@@ -148,6 +155,17 @@ function isHeicFile(file: File) {
   );
 }
 
+function isWordFile(file: File) {
+  const extension = extensionOf(file.name);
+  return (
+    file.type === 'application/msword' ||
+    file.type ===
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+    extension === 'doc' ||
+    extension === 'docx'
+  );
+}
+
 function isSupportedConversionFile(file: File) {
   return (
     isJpegFile(file) ||
@@ -163,6 +181,7 @@ function matchesConversionSource(file: File, source: ConversionSource) {
     return file.type === 'image/webp' || extensionOf(file.name) === 'webp';
   if (source === 'heic') return isHeicFile(file);
   if (source === 'jpeg') return isJpegFile(file);
+  if (source === 'word') return isWordFile(file);
   return false;
 }
 
@@ -290,7 +309,10 @@ async function compressImage(
   };
 }
 
-async function convertImage(file: File, target: ConversionTarget) {
+async function convertImage(
+  file: File,
+  target: Exclude<ConversionTarget, 'pdf'>,
+) {
   const sourceExtension = extensionOf(file.name);
   const sourceIsJpeg = isJpegFile(file);
   const outputName = `${nameWithoutExtension(file.name)}.${target}`;
@@ -325,6 +347,218 @@ async function convertImage(file: File, target: ConversionTarget) {
   canvas.width = 1;
   canvas.height = 1;
   return { blob, name: outputName };
+}
+
+type OfficeDocumentAst = {
+  toText?: () => string;
+  toMarkdown?: () => string;
+};
+
+type OfficeParserBrowser = {
+  parseOffice: (
+    input: ArrayBuffer,
+    config?: Record<string, unknown>,
+  ) => Promise<OfficeDocumentAst>;
+};
+
+let officeParserPromise: Promise<OfficeParserBrowser> | undefined;
+
+async function loadOfficeParser() {
+  if (!officeParserPromise) {
+    officeParserPromise = (async () => {
+      const module =
+        await import('@jose.espana/docstream/dist/officeparser.browser.js?url');
+      const global = globalThis as typeof globalThis & {
+        officeParser?: OfficeParserBrowser;
+      };
+      const existing = document.querySelector<HTMLScriptElement>(
+        'script[data-office-parser="true"]',
+      );
+
+      if (!global.officeParser) {
+        await new Promise<void>((resolve, reject) => {
+          const script = existing ?? document.createElement('script');
+          if (!existing) {
+            script.dataset.officeParser = 'true';
+            script.src = module.default;
+            script.async = true;
+            document.head.appendChild(script);
+          }
+          script.addEventListener('load', () => resolve(), { once: true });
+          script.addEventListener(
+            'error',
+            () => reject(new Error('未能載入 DOC 文件轉換器')),
+            { once: true },
+          );
+        });
+      }
+
+      if (!global.officeParser?.parseOffice) {
+        throw new Error('未能載入 DOC 文件轉換器');
+      }
+      return global.officeParser;
+    })().catch((error) => {
+      officeParserPromise = undefined;
+      throw error;
+    });
+  }
+  return officeParserPromise;
+}
+
+function escapeHtml(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function plainTextToHtml(text: string) {
+  const blocks = text
+    .replace(/\r\n?/g, '\n')
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter(Boolean)
+    .map((block) => `<p>${escapeHtml(block).replaceAll('\n', '<br />')}</p>`);
+  return blocks.join('') || '<p>（文件沒有可顯示內容）</p>';
+}
+
+async function wordDocumentToHtml(file: File) {
+  const source = await file.arrayBuffer();
+  if (extensionOf(file.name) === 'docx') {
+    const mammothModule = await import('mammoth');
+    const mammoth = mammothModule.default ?? mammothModule;
+    const result = await mammoth.convertToHtml(
+      { arrayBuffer: source },
+      { convertImage: mammoth.images.dataUri },
+    );
+    return {
+      html: result.value || '<p>（文件沒有可顯示內容）</p>',
+      note: 'DOCX 已在瀏覽器內轉成 PDF；複雜版面可能會略有不同。',
+    };
+  }
+
+  const parser = await loadOfficeParser();
+  const ast = await parser.parseOffice(source);
+  const text = ast.toText?.() ?? ast.toMarkdown?.() ?? '';
+  return {
+    html: plainTextToHtml(text),
+    note: 'DOC 已在瀏覽器內轉成 PDF；舊式 Word 的複雜版面可能會略有不同。',
+  };
+}
+
+async function convertWordToPdf(
+  file: File,
+  onProgress: (progress: number) => void,
+) {
+  const [{ default: html2canvas }, jspdf] = await Promise.all([
+    import('html2canvas'),
+    import('jspdf'),
+  ]);
+  const documentContent = await wordDocumentToHtml(file);
+  const container = document.createElement('div');
+  container.style.position = 'fixed';
+  container.style.left = '-100000px';
+  container.style.top = '0';
+  container.style.width = '794px';
+  container.style.boxSizing = 'border-box';
+  container.style.padding = '52px';
+  container.style.background = '#ffffff';
+  container.style.color = '#111827';
+  container.style.fontFamily = 'Arial, "Noto Sans TC", sans-serif';
+  container.style.fontSize = '15px';
+  container.style.lineHeight = '1.65';
+  container.innerHTML = `
+    <style>
+      * { box-sizing: border-box; }
+      h1, h2, h3, h4, h5, h6 { margin: 0 0 14px; line-height: 1.25; }
+      p { margin: 0 0 12px; }
+      ul, ol { margin: 0 0 12px; padding-left: 28px; }
+      table { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
+      td, th { border: 1px solid #d1d5db; padding: 6px 8px; vertical-align: top; }
+      img { max-width: 100%; height: auto; }
+      a { color: #075b50; text-decoration: underline; }
+    </style>
+    <main>${documentContent.html}</main>
+  `;
+  document.body.appendChild(container);
+
+  try {
+    await document.fonts?.ready;
+    const capture = await html2canvas(container, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+      logging: false,
+    });
+    const pageWidth = 210;
+    const pageHeight = 297;
+    const margin = 12;
+    const contentWidth = pageWidth - margin * 2;
+    const contentHeight = pageHeight - margin * 2;
+    const pixelsPerMillimetre = capture.width / contentWidth;
+    const pagePixelHeight = Math.max(
+      1,
+      Math.floor(contentHeight * pixelsPerMillimetre),
+    );
+    const pdf = new jspdf.jsPDF({
+      unit: 'mm',
+      format: 'a4',
+      orientation: 'portrait',
+      compress: true,
+    });
+
+    let offset = 0;
+    let pageIndex = 0;
+    while (offset < capture.height) {
+      const sliceHeight = Math.min(pagePixelHeight, capture.height - offset);
+      const pageCanvas = document.createElement('canvas');
+      pageCanvas.width = capture.width;
+      pageCanvas.height = sliceHeight;
+      const pageContext = pageCanvas.getContext('2d', { alpha: false });
+      if (!pageContext) throw new Error('你的瀏覽器未能建立 PDF 頁面');
+      pageContext.fillStyle = '#ffffff';
+      pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
+      pageContext.drawImage(
+        capture,
+        0,
+        offset,
+        capture.width,
+        sliceHeight,
+        0,
+        0,
+        pageCanvas.width,
+        pageCanvas.height,
+      );
+
+      if (pageIndex > 0) pdf.addPage('a4', 'portrait');
+      pdf.addImage(
+        pageCanvas.toDataURL('image/jpeg', 0.92),
+        'JPEG',
+        margin,
+        margin,
+        contentWidth,
+        sliceHeight / pixelsPerMillimetre,
+        undefined,
+        'FAST',
+      );
+      pageCanvas.width = 1;
+      pageCanvas.height = 1;
+      offset += sliceHeight;
+      pageIndex += 1;
+      onProgress(Math.min(98, Math.round((offset / capture.height) * 98)));
+    }
+
+    onProgress(100);
+    return {
+      blob: pdf.output('blob'),
+      name: `${nameWithoutExtension(file.name)}.pdf`,
+      note: documentContent.note,
+    };
+  } finally {
+    container.remove();
+  }
 }
 
 async function compressPdf(
@@ -400,7 +634,8 @@ async function compressPdf(
 }
 
 function FileTypeIcon({ file }: { file: File }) {
-  if (isPdfFile(file)) return <FileText aria-hidden="true" />;
+  if (isPdfFile(file) || isWordFile(file))
+    return <FileText aria-hidden="true" />;
   return <FileImage aria-hidden="true" />;
 }
 
@@ -475,6 +710,10 @@ export default function Home() {
     (item): item is QueueItem & { output: Blob; outputName: string } =>
       item.status === 'done' && Boolean(item.output && item.outputName),
   );
+  const availableTargetOptions =
+    convertFrom === 'word'
+      ? conversionTargetOptions.filter((option) => option.value === 'pdf')
+      : conversionTargetOptions.filter((option) => option.value !== 'pdf');
 
   function changeMode(nextMode: ToolMode) {
     setMode(nextMode);
@@ -525,7 +764,12 @@ export default function Home() {
 
     try {
       if (mode === 'convert') {
-        const result = await convertImage(item.file, convertTo);
+        const result =
+          convertTo === 'pdf'
+            ? await convertWordToPdf(item.file, (progress) =>
+                updateItem(item.id, { progress }),
+              )
+            : await convertImage(item.file, convertTo);
         updateItem(item.id, {
           status: 'done',
           progress: 100,
@@ -655,7 +899,8 @@ export default function Home() {
               </span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              壓縮相片和 PDF，互轉 JPEG、JPG、HEIC、WebP，網頁秒變QR code。
+              壓縮相片和 PDF，互轉 JPEG、JPG、HEIC、WebP，DOC / DOCX 轉
+              PDF，網頁秒變QR code。
             </p>
           </div>
           <div className="hidden gap-8 rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] px-6 py-4 lg:flex">
@@ -846,7 +1091,10 @@ export default function Home() {
                       id="convert-from"
                       value={convertFrom}
                       onChange={(event) => {
-                        setConvertFrom(event.target.value as ConversionSource);
+                        const nextSource = event.target
+                          .value as ConversionSource;
+                        setConvertFrom(nextSource);
+                        setConvertTo(nextSource === 'word' ? 'pdf' : 'jpeg');
                         setQueue([]);
                       }}
                     >
@@ -875,7 +1123,7 @@ export default function Home() {
                         setConvertTo(event.target.value as ConversionTarget)
                       }
                     >
-                      {conversionTargetOptions.map((option) => (
+                      {availableTargetOptions.map((option) => (
                         <NativeSelectOption
                           key={option.value}
                           value={option.value}
@@ -891,8 +1139,9 @@ export default function Home() {
                       支援轉換
                     </div>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      HEIC / HEIF 可作來源，輸出為 JPEG、JPG、HEIC 或 WebP；JPEG
-                      與 JPG 只會更改副檔名，不會重新壓縮。
+                      DOC / DOCX 可轉成 PDF；HEIC / HEIF 可作圖片來源，輸出為
+                      JPEG、JPG、HEIC 或 WebP。JPEG 與 JPG
+                      只會更改副檔名，不會重新壓縮。
                     </p>
                   </div>
                 </div>
