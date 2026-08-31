@@ -33,11 +33,11 @@ import {
 } from '@/components/ui/native-select';
 import { Progress } from '@/components/ui/progress';
 
-type ToolMode = 'compress' | 'convert' | 'qr';
+type ToolMode = 'compress' | 'convert' | 'qr' | 'docpdf';
 type PresetKey = 'clear' | 'balanced' | 'smallest';
 type FileStatus = 'ready' | 'processing' | 'done' | 'error';
-type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg' | 'word';
-type ConversionTarget = 'jpeg' | 'jpg' | 'heic' | 'webp' | 'pdf';
+type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg';
+type ConversionTarget = 'jpeg' | 'jpg' | 'heic' | 'webp';
 
 type QueueItem = {
   id: string;
@@ -103,12 +103,6 @@ const conversionSourceOptions: Array<{
     accept: '.heic,.heif,image/heic,image/heif',
   },
   { value: 'jpeg', label: 'JPEG / JPG', accept: '.jpeg,.jpg,image/jpeg' },
-  {
-    value: 'word',
-    label: 'DOC / DOCX',
-    accept:
-      '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  },
 ];
 
 const conversionTargetOptions: Array<{
@@ -120,7 +114,6 @@ const conversionTargetOptions: Array<{
   { value: 'jpg', label: 'JPG', description: '與 JPEG 內容相同' },
   { value: 'heic', label: 'HEIC', description: '容量較細，適合手機相片' },
   { value: 'webp', label: 'WebP', description: '容量較細，適合網頁' },
-  { value: 'pdf', label: 'PDF', description: '適合列印及分享' },
 ];
 
 function formatBytes(bytes: number) {
@@ -181,7 +174,6 @@ function matchesConversionSource(file: File, source: ConversionSource) {
     return file.type === 'image/webp' || extensionOf(file.name) === 'webp';
   if (source === 'heic') return isHeicFile(file);
   if (source === 'jpeg') return isJpegFile(file);
-  if (source === 'word') return isWordFile(file);
   return false;
 }
 
@@ -309,10 +301,7 @@ async function compressImage(
   };
 }
 
-async function convertImage(
-  file: File,
-  target: Exclude<ConversionTarget, 'pdf'>,
-) {
+async function convertImage(file: File, target: ConversionTarget) {
   const sourceExtension = extensionOf(file.name);
   const sourceIsJpeg = isJpegFile(file);
   const outputName = `${nameWithoutExtension(file.name)}.${target}`;
@@ -710,11 +699,6 @@ export default function Home() {
     (item): item is QueueItem & { output: Blob; outputName: string } =>
       item.status === 'done' && Boolean(item.output && item.outputName),
   );
-  const availableTargetOptions =
-    convertFrom === 'word'
-      ? conversionTargetOptions.filter((option) => option.value === 'pdf')
-      : conversionTargetOptions.filter((option) => option.value !== 'pdf');
-
   function changeMode(nextMode: ToolMode) {
     setMode(nextMode);
     setQueue([]);
@@ -724,6 +708,7 @@ export default function Home() {
     const incoming = Array.from(fileList);
     const accepted = incoming.filter((file) => {
       if (mode === 'convert') return matchesConversionSource(file, convertFrom);
+      if (mode === 'docpdf') return isWordFile(file);
       return isPdfFile(file) || supportedImageTypes.has(file.type);
     });
 
@@ -763,13 +748,23 @@ export default function Home() {
     });
 
     try {
+      if (mode === 'docpdf') {
+        const result = await convertWordToPdf(item.file, (progress) =>
+          updateItem(item.id, { progress }),
+        );
+        updateItem(item.id, {
+          status: 'done',
+          progress: 100,
+          output: result.blob,
+          outputName: result.name,
+          outputSize: result.blob.size,
+          note: result.note,
+        });
+        return;
+      }
+
       if (mode === 'convert') {
-        const result =
-          convertTo === 'pdf'
-            ? await convertWordToPdf(item.file, (progress) =>
-                updateItem(item.id, { progress }),
-              )
-            : await convertImage(item.file, convertTo);
+        const result = await convertImage(item.file, convertTo);
         updateItem(item.id, {
           status: 'done',
           progress: 100,
@@ -946,6 +941,15 @@ export default function Home() {
               >
                 <QrCode aria-hidden="true" /> 網頁 QR Code
               </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={mode === 'docpdf'}
+                className={mode === 'docpdf' ? 'active' : ''}
+                onClick={() => changeMode('docpdf')}
+              >
+                <FileText aria-hidden="true" /> DOC → PDF
+              </button>
             </div>
           </div>
 
@@ -958,14 +962,18 @@ export default function Home() {
                     ? '選擇壓縮程度'
                     : mode === 'convert'
                       ? '選擇來源與目標格式'
-                      : '輸入網頁網址'}
+                      : mode === 'docpdf'
+                        ? 'DOC 轉 PDF'
+                        : '輸入網頁網址'}
                 </h2>
                 <p className="mt-2 text-sm leading-6 text-muted-foreground">
                   {mode === 'compress'
                     ? '先選取畫質與容量的平衡，完成後可逐個下載。'
                     : mode === 'convert'
                       ? '先揀「由格式」和「轉做」，再加入相片；所有轉換都在瀏覽器內完成。'
-                      : '貼上網址後會即時生成 QR Code，可下載 PNG 圖片。'}
+                      : mode === 'docpdf'
+                        ? '可一次加入多個 DOC／DOCX 文件，轉換會在瀏覽器內完成。'
+                        : '貼上網址後會即時生成 QR Code，可下載 PNG 圖片。'}
                 </p>
               </div>
 
@@ -1014,6 +1022,23 @@ export default function Home() {
                       QR Code
                       只會儲存你輸入的網址；生成過程不會讀取或上傳網頁內容。
                     </p>
+                  </div>
+                </div>
+              ) : mode === 'docpdf' ? (
+                <div className="space-y-4">
+                  <div className="rounded-2xl border border-[color:var(--brand)]/15 bg-[color:var(--mint)]/45 p-4">
+                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[color:var(--brand-deep)]">
+                      <FileText className="size-4" aria-hidden="true" />
+                      直接轉換
+                    </div>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      支援 DOC 及 DOCX。可一次選取多個文件，完成後會逐個下載
+                      PDF。
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] p-4 text-xs leading-5 text-muted-foreground">
+                    舊式 DOC 或複雜 Word
+                    版面，轉換後可能會有少量差異；重要文件請保留原檔。
                   </div>
                 </div>
               ) : mode === 'compress' ? (
@@ -1094,7 +1119,7 @@ export default function Home() {
                         const nextSource = event.target
                           .value as ConversionSource;
                         setConvertFrom(nextSource);
-                        setConvertTo(nextSource === 'word' ? 'pdf' : 'jpeg');
+                        setConvertTo('jpeg');
                         setQueue([]);
                       }}
                     >
@@ -1123,7 +1148,7 @@ export default function Home() {
                         setConvertTo(event.target.value as ConversionTarget)
                       }
                     >
-                      {availableTargetOptions.map((option) => (
+                      {conversionTargetOptions.map((option) => (
                         <NativeSelectOption
                           key={option.value}
                           value={option.value}
@@ -1139,9 +1164,9 @@ export default function Home() {
                       支援轉換
                     </div>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      DOC / DOCX 可轉成 PDF；HEIC / HEIF 可作圖片來源，輸出為
-                      JPEG、JPG、HEIC 或 WebP。JPEG 與 JPG
-                      只會更改副檔名，不會重新壓縮。
+                      HEIC / HEIF 可作圖片來源，輸出為 JPEG、JPG、HEIC 或 WebP。
+                      JPEG 與 JPG 只會更改副檔名，不會重新壓縮；DOC／DOCX
+                      請使用旁邊的「DOC → PDF」功能。
                     </p>
                   </div>
                 </div>
@@ -1167,7 +1192,9 @@ export default function Home() {
                         ? convertFrom === 'auto'
                           ? '加入圖片檔案'
                           : `加入 ${conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片'}`
-                        : '預覽你的 QR Code'}
+                        : mode === 'docpdf'
+                          ? '加入 DOC／DOCX 文件'
+                          : '預覽你的 QR Code'}
                   </h2>
                 </div>
                 {queue.length > 0 && (
@@ -1260,9 +1287,11 @@ export default function Home() {
                     accept={
                       mode === 'compress'
                         ? '.pdf,.jpeg,.jpg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp'
-                        : conversionSourceOptions.find(
-                            (option) => option.value === convertFrom,
-                          )?.accept
+                        : mode === 'docpdf'
+                          ? '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                          : conversionSourceOptions.find(
+                              (option) => option.value === convertFrom,
+                            )?.accept
                     }
                     onChange={(event) => {
                       if (event.target.files) addFiles(event.target.files);
@@ -1286,7 +1315,9 @@ export default function Home() {
                   <p className="mt-4 text-xs text-muted-foreground">
                     {mode === 'compress'
                       ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案（沒有硬性數量上限）'
-                      : `支援 ${convertFrom === 'auto' ? 'WebP、HEIC、JPEG/JPG' : (conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片')}・可一次加入多個檔案`}
+                      : mode === 'docpdf'
+                        ? '支援 DOC、DOCX・可一次加入多個檔案（沒有硬性數量上限）'
+                        : `支援 ${convertFrom === 'auto' ? 'WebP、HEIC、JPEG/JPG' : (conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片')}・可一次加入多個檔案`}
                   </p>
                 </div>
               )}
@@ -1418,7 +1449,9 @@ export default function Home() {
                     >
                       {mode === 'compress'
                         ? `開始壓縮 ${readyCount} 個檔案`
-                        : `轉換 ${readyCount} 個檔案`}{' '}
+                        : mode === 'docpdf'
+                          ? `轉換 ${readyCount} 個 DOC／DOCX 文件`
+                          : `轉換 ${readyCount} 個檔案`}{' '}
                       <ArrowDownToLine data-icon="inline-end" />
                     </Button>
                   )}

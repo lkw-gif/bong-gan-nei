@@ -136,7 +136,7 @@
 
 .mode-switch {
   display: inline-grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.25rem;
   border-radius: 0.85rem 0.85rem 0 0;
   background: var(--panel);
