@@ -647,9 +647,6 @@ export default function Home() {
               <Badge className="bg-[color:var(--lime)] text-[color:var(--brand-deep)]">
                 <Sparkles data-icon="inline-start" /> 免費・免上傳
               </Badge>
-              <span className="text-xs font-medium text-muted-foreground">
-                PDF · JPEG · JPG · PNG · WebP · HEIC · 網頁 QR Code
-              </span>
             </div>
             <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] sm:text-5xl lg:text-[58px] lg:leading-[1.02]">
               你有壓力我有壓力，
@@ -658,8 +655,7 @@ export default function Home() {
               </span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              壓縮相片和 PDF，互轉
-              JPEG、JPG、HEIC、WebP。全部在你的裝置內完成，檔案不會離開瀏覽器。
+              壓縮相片和 PDF，互轉 JPEG、JPG、HEIC、WebP，網頁秒變QR code。
             </p>
           </div>
           <div className="hidden gap-8 rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] px-6 py-4 lg:flex">
