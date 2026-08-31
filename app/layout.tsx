@@ -16,11 +16,11 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://bong-gan-nei.davidlui.chatgpt.site'),
   title: '你有壓力我有壓力，轉一轉世界更美妙。｜幫緊你幫緊你～',
   description:
-    '在瀏覽器內壓縮 PDF 及圖片，互轉 JPEG、JPG、HEIC、WebP。亦支援網頁 QR Code。檔案不會上傳。',
+    '在瀏覽器內壓縮 PDF 及圖片，互轉 JPEG、JPG、HEIC、WebP，並將 DOC／DOCX 轉成 PDF。亦支援網頁 QR Code。檔案不會上傳。',
   openGraph: {
     title: '你有壓力我有壓力，轉一轉世界更美妙。',
     description:
-      '免費壓縮 PDF 及圖片，轉換 JPEG、JPG、WebP 和 HEIC，亦可生成網頁 QR Code。全部在瀏覽器內處理。',
+      '免費壓縮 PDF 及圖片，轉換 JPEG、JPG、WebP 和 HEIC，DOC／DOCX 亦可轉成 PDF，並可生成網頁 QR Code。全部在瀏覽器內處理。',
     type: 'website',
     locale: 'zh_HK',
     url: 'https://bong-gan-nei.davidlui.chatgpt.site',
@@ -36,7 +36,8 @@ export const metadata: Metadata = {
   twitter: {
     card: 'summary_large_image',
     title: '你有壓力我有壓力，轉一轉世界更美妙。',
-    description: '免費壓縮及轉換 PDF、圖片，檔案不會上傳。',
+    description:
+      '免費壓縮及轉換 PDF、圖片，DOC／DOCX 可轉成 PDF，檔案不會上傳。',
     images: ['/og.png'],
   },
 };
