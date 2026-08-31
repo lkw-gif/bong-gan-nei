@@ -531,25 +531,24 @@ export default function Home() {
                     >
                       圖片最長邊
                     </label>
-                    <NativeSelect className="w-full">
-                      <select
-                        id="max-edge"
-                        value={maxLongEdge}
-                        onChange={(event) => setMaxLongEdge(event.target.value)}
-                      >
-                        <NativeSelectOption value="0">
-                          保留原尺寸
-                        </NativeSelectOption>
-                        <NativeSelectOption value="2560">
-                          最多 2560 px
-                        </NativeSelectOption>
-                        <NativeSelectOption value="1920">
-                          最多 1920 px（建議）
-                        </NativeSelectOption>
-                        <NativeSelectOption value="1280">
-                          最多 1280 px
-                        </NativeSelectOption>
-                      </select>
+                    <NativeSelect
+                      className="w-full"
+                      id="max-edge"
+                      value={maxLongEdge}
+                      onChange={(event) => setMaxLongEdge(event.target.value)}
+                    >
+                      <NativeSelectOption value="0">
+                        保留原尺寸
+                      </NativeSelectOption>
+                      <NativeSelectOption value="2560">
+                        最多 2560 px
+                      </NativeSelectOption>
+                      <NativeSelectOption value="1920">
+                        最多 1920 px（建議）
+                      </NativeSelectOption>
+                      <NativeSelectOption value="1280">
+                        最多 1280 px
+                      </NativeSelectOption>
                     </NativeSelect>
                     <p className="mt-2 text-xs leading-5 text-muted-foreground">
                       只影響圖片；PDF 會按所選壓縮程度處理。
