@@ -37,7 +37,7 @@ type ToolMode = 'compress' | 'convert' | 'qr';
 type PresetKey = 'clear' | 'balanced' | 'smallest';
 type FileStatus = 'ready' | 'processing' | 'done' | 'error';
 type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg' | 'png';
-type ConversionTarget = 'webp' | 'jpeg' | 'jpg' | 'transparent-png';
+type ConversionTarget = 'jpeg' | 'jpg' | 'webp';
 
 type QueueItem = {
   id: string;
@@ -111,14 +111,9 @@ const conversionTargetOptions: Array<{
   label: string;
   description: string;
 }> = [
-  { value: 'webp', label: 'WebP', description: '容量較細，適合網頁' },
   { value: 'jpeg', label: 'JPEG', description: '相片通用格式' },
   { value: 'jpg', label: 'JPG', description: '與 JPEG 內容相同' },
-  {
-    value: 'transparent-png',
-    label: '透明 PNG',
-    description: '自動移除邊緣背景',
-  },
+  { value: 'webp', label: 'WebP', description: '容量較細，適合網頁' },
 ];
 
 function formatBytes(bytes: number) {
@@ -207,119 +202,6 @@ async function imageBitmapFromFile(file: File) {
   return createImageBitmap(file, { imageOrientation: 'from-image' });
 }
 
-function removeBackgroundFromCanvas(canvas: HTMLCanvasElement) {
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('你的瀏覽器未能建立透明圖層');
-  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-  const { data, width, height } = imageData;
-  const borderColors: Array<[number, number, number]> = [];
-  const addBorderColor = (pixel: number) => {
-    const offset = pixel * 4;
-    if (data[offset + 3] > 0) {
-      borderColors.push([data[offset], data[offset + 1], data[offset + 2]]);
-    }
-  };
-
-  for (let x = 0; x < width; x += 1) {
-    addBorderColor(x);
-    addBorderColor((height - 1) * width + x);
-  }
-  for (let y = 1; y < height - 1; y += 1) {
-    addBorderColor(y * width);
-    addBorderColor(y * width + width - 1);
-  }
-
-  if (!borderColors.length) return canvas;
-
-  const median = (channel: 0 | 1 | 2) => {
-    const values = borderColors
-      .map((color) => color[channel])
-      .sort((a, b) => a - b);
-    return values[Math.floor(values.length / 2)];
-  };
-  const background: [number, number, number] = [
-    median(0),
-    median(1),
-    median(2),
-  ];
-  const backgroundChroma = Math.max(...background) - Math.min(...background);
-  const colorDistance = (pixel: number) => {
-    const offset = pixel * 4;
-    const dr = data[offset] - background[0];
-    const dg = data[offset + 1] - background[1];
-    const db = data[offset + 2] - background[2];
-    return Math.sqrt(dr * dr + dg * dg + db * db);
-  };
-  const colorChroma = (pixel: number) => {
-    const offset = pixel * 4;
-    return (
-      Math.max(data[offset], data[offset + 1], data[offset + 2]) -
-      Math.min(data[offset], data[offset + 1], data[offset + 2])
-    );
-  };
-  const borderDistances = borderColors
-    .map(([red, green, blue]) => {
-      const dr = red - background[0];
-      const dg = green - background[1];
-      const db = blue - background[2];
-      return Math.sqrt(dr * dr + dg * dg + db * db);
-    })
-    .sort((a, b) => a - b);
-  const borderSpread =
-    borderDistances[Math.floor(borderDistances.length * 0.9)] ?? 0;
-  const neutralBackground = backgroundChroma <= 18;
-  const hardTolerance = neutralBackground
-    ? Math.max(18, Math.min(28, borderSpread + 12))
-    : Math.max(22, Math.min(40, borderSpread + 16));
-  const softTolerance = hardTolerance + (neutralBackground ? 14 : 18);
-  const isBackgroundLike = (pixel: number) => {
-    const distance = colorDistance(pixel);
-    if (distance > softTolerance) return false;
-    if (!neutralBackground) return true;
-    // Pale subjects (like the user's pink pig) can be close to white in RGB,
-    // so protect pixels with noticeably more colour than the edge background.
-    return colorChroma(pixel) <= backgroundChroma + 14;
-  };
-  const visited = new Uint8Array(width * height);
-  const stack: number[] = [];
-
-  for (let x = 0; x < width; x += 1) {
-    stack.push(x, (height - 1) * width + x);
-  }
-  for (let y = 1; y < height - 1; y += 1) {
-    stack.push(y * width, y * width + width - 1);
-  }
-
-  while (stack.length) {
-    const pixel = stack.pop();
-    if (
-      pixel === undefined ||
-      visited[pixel] ||
-      !isBackgroundLike(pixel) ||
-      data[pixel * 4 + 3] === 0
-    )
-      continue;
-    visited[pixel] = 1;
-    const distance = colorDistance(pixel);
-    data[pixel * 4 + 3] =
-      distance <= hardTolerance
-        ? 0
-        : Math.round(
-            ((distance - hardTolerance) / (softTolerance - hardTolerance)) *
-              255,
-          );
-    const x = pixel % width;
-    const y = Math.floor(pixel / width);
-    if (x > 0) stack.push(pixel - 1);
-    if (x < width - 1) stack.push(pixel + 1);
-    if (y > 0) stack.push(pixel - width);
-    if (y < height - 1) stack.push(pixel + width);
-  }
-
-  context.putImageData(imageData, 0, 0);
-  return canvas;
-}
-
 async function compressImage(
   file: File,
   preset: (typeof presets)[PresetKey],
@@ -384,14 +266,13 @@ async function compressImage(
 async function convertImage(file: File, target: ConversionTarget) {
   const sourceExtension = extensionOf(file.name);
   const sourceIsJpeg = isJpegFile(file);
-  const targetExtension = target === 'transparent-png' ? 'png' : target;
-  const outputName = `${nameWithoutExtension(file.name)}.${targetExtension}`;
+  const outputName = `${nameWithoutExtension(file.name)}.${target}`;
 
   if (sourceIsJpeg && (target === 'jpeg' || target === 'jpg')) {
     return {
       blob: file,
       name: outputName,
-      note: `只更改副檔名（${sourceExtension.toUpperCase()} → ${targetExtension.toUpperCase()}），不會重新壓縮。`,
+      note: `只更改副檔名（${sourceExtension.toUpperCase()} → ${target.toUpperCase()}），不會重新壓縮。`,
     };
   }
 
@@ -406,23 +287,12 @@ async function convertImage(file: File, target: ConversionTarget) {
   context.drawImage(bitmap, 0, 0);
   bitmap.close();
 
-  let note: string | undefined;
-  if (target === 'transparent-png') {
-    removeBackgroundFromCanvas(canvas);
-    note = '已按邊緣背景色自動去背；背景複雜的相片可能需要手動修整。';
-  }
-
-  const outputType =
-    target === 'webp'
-      ? 'image/webp'
-      : target === 'transparent-png'
-        ? 'image/png'
-        : 'image/jpeg';
-  const quality = outputType === 'image/jpeg' ? 0.9 : 0.9;
+  const outputType = target === 'webp' ? 'image/webp' : 'image/jpeg';
+  const quality = 0.9;
   const blob = await canvasToBlob(canvas, outputType, quality);
   canvas.width = 1;
   canvas.height = 1;
-  return { blob, name: outputName, note };
+  return { blob, name: outputName };
 }
 
 async function compressPdf(
@@ -507,7 +377,7 @@ export default function Home() {
   const [preset, setPreset] = useState<PresetKey>('balanced');
   const [maxLongEdge, setMaxLongEdge] = useState('1920');
   const [convertFrom, setConvertFrom] = useState<ConversionSource>('auto');
-  const [convertTo, setConvertTo] = useState<ConversionTarget>('webp');
+  const [convertTo, setConvertTo] = useState<ConversionTarget>('jpeg');
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [dragging, setDragging] = useState(false);
   const [qrInput, setQrInput] = useState('');
@@ -754,8 +624,8 @@ export default function Home() {
               <span className="text-[color:var(--brand)]">傳送快好多。</span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              壓縮相片和 PDF，互轉 WebP、HEIC、JPEG、JPG，亦可一鍵生成透明
-              PNG。全部在你的裝置內完成，檔案不會離開瀏覽器。
+              壓縮相片和 PDF，互轉 JPEG、JPG、WebP，HEIC 亦可轉成常用圖片格式。
+              全部在你的裝置內完成，檔案不會離開瀏覽器。
             </p>
           </div>
           <div className="hidden gap-8 rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] px-6 py-4 lg:flex">
@@ -991,8 +861,8 @@ export default function Home() {
                       支援轉換
                     </div>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      HEIC / HEIF 可作來源，輸出為瀏覽器通用格式。選「透明
-                      PNG」會自動按邊緣背景色去背，並保護與背景色相近的主體細節。
+                      HEIC / HEIF 可作來源，輸出為 JPEG、JPG 或 WebP；JPEG 與
+                      JPG 只會更改副檔名，不會重新壓縮。
                     </p>
                   </div>
                 </div>

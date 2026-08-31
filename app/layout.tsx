@@ -16,11 +16,11 @@ export const metadata: Metadata = {
   metadataBase: new URL('https://ya-sai-di.davidlui.chatgpt.site'),
   title: '壓細啲｜免費檔案壓縮及格式轉換工具',
   description:
-    '在瀏覽器內壓縮 PDF 及圖片，互轉 WebP、HEIC、JPEG、JPG，亦可生成透明 PNG 和網頁 QR Code。檔案不會上傳。',
+    '在瀏覽器內壓縮 PDF 及圖片，互轉 JPEG、JPG、WebP，HEIC 亦可轉成常用圖片格式。亦支援網頁 QR Code。檔案不會上傳。',
   openGraph: {
     title: '壓細啲｜檔案細一截，傳送快好多。',
     description:
-      '免費壓縮 PDF 及圖片，轉換常用格式、生成透明 PNG 和網頁 QR Code。全部在瀏覽器內處理。',
+      '免費壓縮 PDF 及圖片，轉換 JPEG、JPG、WebP 和 HEIC，亦可生成網頁 QR Code。全部在瀏覽器內處理。',
     type: 'website',
     locale: 'zh_HK',
     url: 'https://ya-sai-di.davidlui.chatgpt.site',
