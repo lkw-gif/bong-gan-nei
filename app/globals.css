@@ -1,0 +1,317 @@
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@import 'shadcn/tailwind.css';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+}
+
+:root {
+  --background: #f5f4ee;
+  --foreground: #142923;
+  --card: #ffffff;
+  --card-foreground: #142923;
+  --popover: #ffffff;
+  --popover-foreground: #142923;
+  --primary: #075b50;
+  --primary-foreground: #ffffff;
+  --secondary: #e9eee9;
+  --secondary-foreground: #173b34;
+  --muted: #e9eee9;
+  --muted-foreground: #60716b;
+  --accent: #ddf4e8;
+  --accent-foreground: #075b50;
+  --destructive: #c43d3d;
+  --border: #d8ddd7;
+  --input: #cfd8d2;
+  --ring: #27a98f;
+  --radius: 0.75rem;
+  --brand: #075b50;
+  --brand-deep: #043d36;
+  --mint: #ccefe2;
+  --lime: #d5f26b;
+  --paper: #fffef9;
+  --panel: #f0f1eb;
+  --line: #d9ddd6;
+}
+
+.dark {
+  --background: #0e211d;
+  --foreground: #ecf5f1;
+  --card: #17342d;
+  --card-foreground: #ecf5f1;
+  --popover: #17342d;
+  --popover-foreground: #ecf5f1;
+  --primary: #8fe0c7;
+  --primary-foreground: #08221c;
+  --secondary: #23463e;
+  --secondary-foreground: #ecf5f1;
+  --muted: #23463e;
+  --muted-foreground: #afc5bd;
+  --accent: #285c4e;
+  --accent-foreground: #effbf7;
+  --destructive: #ff8b8b;
+  --border: #34584f;
+  --input: #3b655b;
+  --ring: #76d5bc;
+  --paper: #132c26;
+  --panel: #17342d;
+  --line: #345047;
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+
+  html {
+    @apply scroll-smooth font-sans;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    min-width: 320px;
+  }
+
+  button,
+  a,
+  input,
+  select {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+::selection {
+  background: var(--lime);
+  color: var(--brand-deep);
+}
+
+.logo-mark {
+  display: inline-flex;
+  height: 2.5rem;
+  width: 2.5rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.8rem;
+  background: var(--brand);
+  color: white;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 18%);
+}
+
+.tool-shell {
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 1.35rem;
+  background: var(--paper);
+  box-shadow: 0 24px 70px rgb(16 54 45 / 8%);
+}
+
+.mode-switch {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.25rem;
+  border-radius: 0.85rem 0.85rem 0 0;
+  background: var(--panel);
+  padding: 0.25rem;
+}
+
+.mode-switch button {
+  display: inline-flex;
+  height: 2.8rem;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  border-radius: 0.65rem;
+  padding: 0 1.15rem;
+  color: var(--muted-foreground);
+  font-size: 0.875rem;
+  font-weight: 700;
+  transition: 160ms ease;
+}
+
+.mode-switch button svg {
+  height: 1rem;
+  width: 1rem;
+}
+
+.mode-switch button.active {
+  background: white;
+  color: var(--brand);
+  box-shadow: 0 2px 8px rgb(10 58 49 / 8%);
+}
+
+.eyebrow {
+  color: var(--brand);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+
+.preset-option {
+  display: grid;
+  width: 100%;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 0.75rem;
+  border: 1px solid transparent;
+  border-radius: 0.9rem;
+  padding: 0.75rem;
+  transition: 160ms ease;
+}
+
+.preset-option:hover {
+  background: rgb(255 255 255 / 64%);
+}
+
+.preset-option.selected {
+  border-color: rgb(7 91 80 / 24%);
+  background: var(--paper);
+  box-shadow: 0 5px 20px rgb(12 67 56 / 6%);
+}
+
+.preset-dot {
+  display: inline-flex;
+  height: 1.25rem;
+  width: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid #aebbb5;
+  border-radius: 999px;
+  margin-top: 0.1rem;
+  color: white;
+}
+
+.preset-option.selected .preset-dot {
+  border-color: var(--brand);
+  background: var(--brand);
+}
+
+.preset-dot svg {
+  height: 0.75rem;
+  width: 0.75rem;
+  stroke-width: 3;
+}
+
+.drop-zone {
+  display: flex;
+  min-height: 270px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px dashed #9ab8ae;
+  border-radius: 1.15rem;
+  background: #fbfcf8;
+  padding: 2rem 1.25rem;
+  text-align: center;
+  transition: 180ms ease;
+}
+
+.drop-zone:hover,
+.drop-zone.dragging {
+  border-color: var(--brand);
+  background: #f3fbf7;
+  box-shadow: inset 0 0 0 3px rgb(7 91 80 / 5%);
+}
+
+.drop-zone.dragging {
+  transform: scale(1.004);
+}
+
+.upload-icon {
+  display: inline-flex;
+  height: 3.4rem;
+  width: 3.4rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 1rem;
+  background: var(--mint);
+  color: var(--brand);
+}
+
+.upload-icon svg {
+  height: 1.55rem;
+  width: 1.55rem;
+}
+
+.file-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+  background: var(--paper);
+  padding: 0.75rem;
+}
+
+.file-icon {
+  display: inline-flex;
+  height: 2.35rem;
+  width: 2.35rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.7rem;
+  background: var(--panel);
+  color: var(--brand);
+}
+
+.file-icon svg {
+  height: 1.1rem;
+  width: 1.1rem;
+}
+
+@media (max-width: 520px) {
+  .mode-switch {
+    display: grid;
+    width: 100%;
+  }
+
+  .mode-switch button {
+    padding-inline: 0.65rem;
+    font-size: 0.8rem;
+  }
+
+  .drop-zone {
+    min-height: 250px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}
