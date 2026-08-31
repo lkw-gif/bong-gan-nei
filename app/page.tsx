@@ -36,8 +36,8 @@ import { Progress } from '@/components/ui/progress';
 type ToolMode = 'compress' | 'convert' | 'qr';
 type PresetKey = 'clear' | 'balanced' | 'smallest';
 type FileStatus = 'ready' | 'processing' | 'done' | 'error';
-type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg' | 'jpc' | 'png';
-type ConversionTarget = 'webp' | 'jpeg' | 'jpg' | 'png' | 'transparent-png';
+type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg' | 'png';
+type ConversionTarget = 'webp' | 'jpeg' | 'jpg' | 'transparent-png';
 
 type QueueItem = {
   id: string;
@@ -94,7 +94,7 @@ const conversionSourceOptions: Array<{
   {
     value: 'auto',
     label: '自動偵測',
-    accept: '.webp,.heic,.heif,.jpeg,.jpg,.jpc,.j2c,.jp2,.png',
+    accept: '.webp,.heic,.heif,.jpeg,.jpg,.png',
   },
   { value: 'webp', label: 'WebP', accept: '.webp,image/webp' },
   {
@@ -103,11 +103,6 @@ const conversionSourceOptions: Array<{
     accept: '.heic,.heif,image/heic,image/heif',
   },
   { value: 'jpeg', label: 'JPEG / JPG', accept: '.jpeg,.jpg,image/jpeg' },
-  {
-    value: 'jpc',
-    label: 'JPC（JPEG 2000）',
-    accept: '.jpc,.j2c,.jp2,image/jp2',
-  },
   { value: 'png', label: 'PNG', accept: '.png,image/png' },
 ];
 
@@ -119,7 +114,6 @@ const conversionTargetOptions: Array<{
   { value: 'webp', label: 'WebP', description: '容量較細，適合網頁' },
   { value: 'jpeg', label: 'JPEG', description: '相片通用格式' },
   { value: 'jpg', label: 'JPG', description: '與 JPEG 內容相同' },
-  { value: 'png', label: 'PNG', description: '保留原本背景' },
   {
     value: 'transparent-png',
     label: '透明 PNG',
@@ -159,19 +153,10 @@ function isHeicFile(file: File) {
   );
 }
 
-function isJpcFile(file: File) {
-  const extension = extensionOf(file.name);
-  return (
-    file.type === 'image/jp2' ||
-    ['jpc', 'j2c', 'jp2', 'jpx'].includes(extension)
-  );
-}
-
 function isSupportedConversionFile(file: File) {
   return (
     isJpegFile(file) ||
     isHeicFile(file) ||
-    isJpcFile(file) ||
     supportedImageTypes.has(file.type) ||
     extensionOf(file.name) === 'png' ||
     extensionOf(file.name) === 'webp'
@@ -184,7 +169,6 @@ function matchesConversionSource(file: File, source: ConversionSource) {
     return file.type === 'image/webp' || extensionOf(file.name) === 'webp';
   if (source === 'heic') return isHeicFile(file);
   if (source === 'jpeg') return isJpegFile(file);
-  if (source === 'jpc') return isJpcFile(file);
   return file.type === 'image/png' || extensionOf(file.name) === 'png';
 }
 
@@ -223,89 +207,42 @@ async function imageBitmapFromFile(file: File) {
   return createImageBitmap(file, { imageOrientation: 'from-image' });
 }
 
-async function canvasFromJpc(file: File) {
-  const { decode } = await import('@abasb75/jpeg2000-decoder');
-  const decoded = await decode(await file.arrayBuffer());
-  const { width, height, componentCount, bitsPerSample } = decoded.frameInfo;
-  const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext('2d');
-  if (!context) throw new Error('你的瀏覽器未能處理這份 JPC');
-
-  const imageData = context.createImageData(width, height);
-  const raw = decoded.decodedBuffer as unknown;
-  const bytes =
-    raw instanceof Uint8Array ? raw : new Uint8Array(raw as ArrayBufferLike);
-  const words = raw instanceof Uint16Array ? raw : undefined;
-  const maxSample = bitsPerSample > 8 ? 2 ** bitsPerSample - 1 : 255;
-  const readSample = (index: number) => {
-    const sample = words ? words[index] : bytes[index];
-    return Math.max(0, Math.min(255, Math.round((sample / maxSample) * 255)));
-  };
-
-  for (let pixel = 0; pixel < width * height; pixel += 1) {
-    const sourceIndex = pixel * componentCount;
-    const targetIndex = pixel * 4;
-    if (componentCount === 1) {
-      const gray = readSample(sourceIndex);
-      imageData.data[targetIndex] = gray;
-      imageData.data[targetIndex + 1] = gray;
-      imageData.data[targetIndex + 2] = gray;
-      imageData.data[targetIndex + 3] = 255;
-    } else {
-      imageData.data[targetIndex] = readSample(sourceIndex);
-      imageData.data[targetIndex + 1] = readSample(sourceIndex + 1);
-      imageData.data[targetIndex + 2] = readSample(sourceIndex + 2);
-      imageData.data[targetIndex + 3] =
-        componentCount > 3 ? readSample(sourceIndex + 3) : 255;
-    }
-  }
-
-  context.putImageData(imageData, 0, 0);
-  return canvas;
-}
-
 function removeBackgroundFromCanvas(canvas: HTMLCanvasElement) {
   const context = canvas.getContext('2d');
   if (!context) throw new Error('你的瀏覽器未能建立透明圖層');
   const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
   const { data, width, height } = imageData;
-  const cornerColors = [
-    [data[0], data[1], data[2]],
-    [
-      data[(width - 1) * 4],
-      data[(width - 1) * 4 + 1],
-      data[(width - 1) * 4 + 2],
-    ],
-    [
-      data[(height - 1) * width * 4],
-      data[(height - 1) * width * 4 + 1],
-      data[(height - 1) * width * 4 + 2],
-    ],
-    [
-      data[(height * width - 1) * 4],
-      data[(height * width - 1) * 4 + 1],
-      data[(height * width - 1) * 4 + 2],
-    ],
+  const borderColors: Array<[number, number, number]> = [];
+  const addBorderColor = (pixel: number) => {
+    const offset = pixel * 4;
+    if (data[offset + 3] > 0) {
+      borderColors.push([data[offset], data[offset + 1], data[offset + 2]]);
+    }
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    addBorderColor(x);
+    addBorderColor((height - 1) * width + x);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    addBorderColor(y * width);
+    addBorderColor(y * width + width - 1);
+  }
+
+  if (!borderColors.length) return canvas;
+
+  const median = (channel: 0 | 1 | 2) => {
+    const values = borderColors
+      .map((color) => color[channel])
+      .sort((a, b) => a - b);
+    return values[Math.floor(values.length / 2)];
+  };
+  const background: [number, number, number] = [
+    median(0),
+    median(1),
+    median(2),
   ];
-  const background = [
-    Math.round(
-      cornerColors.reduce((sum, color) => sum + color[0], 0) /
-        cornerColors.length,
-    ),
-    Math.round(
-      cornerColors.reduce((sum, color) => sum + color[1], 0) /
-        cornerColors.length,
-    ),
-    Math.round(
-      cornerColors.reduce((sum, color) => sum + color[2], 0) /
-        cornerColors.length,
-    ),
-  ];
-  const visited = new Uint8Array(width * height);
-  const stack: number[] = [];
-  const tolerance = 58;
+  const backgroundChroma = Math.max(...background) - Math.min(...background);
   const colorDistance = (pixel: number) => {
     const offset = pixel * 4;
     const dr = data[offset] - background[0];
@@ -313,6 +250,38 @@ function removeBackgroundFromCanvas(canvas: HTMLCanvasElement) {
     const db = data[offset + 2] - background[2];
     return Math.sqrt(dr * dr + dg * dg + db * db);
   };
+  const colorChroma = (pixel: number) => {
+    const offset = pixel * 4;
+    return (
+      Math.max(data[offset], data[offset + 1], data[offset + 2]) -
+      Math.min(data[offset], data[offset + 1], data[offset + 2])
+    );
+  };
+  const borderDistances = borderColors
+    .map(([red, green, blue]) => {
+      const dr = red - background[0];
+      const dg = green - background[1];
+      const db = blue - background[2];
+      return Math.sqrt(dr * dr + dg * dg + db * db);
+    })
+    .sort((a, b) => a - b);
+  const borderSpread =
+    borderDistances[Math.floor(borderDistances.length * 0.9)] ?? 0;
+  const neutralBackground = backgroundChroma <= 18;
+  const hardTolerance = neutralBackground
+    ? Math.max(18, Math.min(28, borderSpread + 12))
+    : Math.max(22, Math.min(40, borderSpread + 16));
+  const softTolerance = hardTolerance + (neutralBackground ? 14 : 18);
+  const isBackgroundLike = (pixel: number) => {
+    const distance = colorDistance(pixel);
+    if (distance > softTolerance) return false;
+    if (!neutralBackground) return true;
+    // Pale subjects (like the user's pink pig) can be close to white in RGB,
+    // so protect pixels with noticeably more colour than the edge background.
+    return colorChroma(pixel) <= backgroundChroma + 14;
+  };
+  const visited = new Uint8Array(width * height);
+  const stack: number[] = [];
 
   for (let x = 0; x < width; x += 1) {
     stack.push(x, (height - 1) * width + x);
@@ -326,12 +295,19 @@ function removeBackgroundFromCanvas(canvas: HTMLCanvasElement) {
     if (
       pixel === undefined ||
       visited[pixel] ||
-      colorDistance(pixel) > tolerance ||
+      !isBackgroundLike(pixel) ||
       data[pixel * 4 + 3] === 0
     )
       continue;
     visited[pixel] = 1;
-    data[pixel * 4 + 3] = 0;
+    const distance = colorDistance(pixel);
+    data[pixel * 4 + 3] =
+      distance <= hardTolerance
+        ? 0
+        : Math.round(
+            ((distance - hardTolerance) / (softTolerance - hardTolerance)) *
+              255,
+          );
     const x = pixel % width;
     const y = Math.floor(pixel / width);
     if (x > 0) stack.push(pixel - 1);
@@ -419,21 +395,16 @@ async function convertImage(file: File, target: ConversionTarget) {
     };
   }
 
-  const sourceCanvas = isJpcFile(file)
-    ? await canvasFromJpc(file)
-    : (() => null)();
-  const bitmap = sourceCanvas ? undefined : await imageBitmapFromFile(file);
-  const canvas = sourceCanvas ?? document.createElement('canvas');
-  if (bitmap) {
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    const context = canvas.getContext('2d');
-    if (!context) throw new Error('你的瀏覽器未能建立轉換畫布');
-    context.imageSmoothingEnabled = true;
-    context.imageSmoothingQuality = 'high';
-    context.drawImage(bitmap, 0, 0);
-    bitmap.close();
-  }
+  const bitmap = await imageBitmapFromFile(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('你的瀏覽器未能建立轉換畫布');
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = 'high';
+  context.drawImage(bitmap, 0, 0);
+  bitmap.close();
 
   let note: string | undefined;
   if (target === 'transparent-png') {
@@ -444,7 +415,7 @@ async function convertImage(file: File, target: ConversionTarget) {
   const outputType =
     target === 'webp'
       ? 'image/webp'
-      : target === 'png' || target === 'transparent-png'
+      : target === 'transparent-png'
         ? 'image/png'
         : 'image/jpeg';
   const quality = outputType === 'image/jpeg' ? 0.9 : 0.9;
@@ -775,7 +746,7 @@ export default function Home() {
                 <Sparkles data-icon="inline-start" /> 免費・免上傳
               </Badge>
               <span className="text-xs font-medium text-muted-foreground">
-                PDF · JPEG · JPG · PNG · WebP · HEIC · JPC · 網頁 QR Code
+                PDF · JPEG · JPG · PNG · WebP · HEIC · 網頁 QR Code
               </span>
             </div>
             <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] sm:text-5xl lg:text-[58px] lg:leading-[1.02]">
@@ -783,7 +754,7 @@ export default function Home() {
               <span className="text-[color:var(--brand)]">傳送快好多。</span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              壓縮相片和 PDF，互轉 WebP、HEIC、JPEG、JPC、PNG，亦可一鍵生成透明
+              壓縮相片和 PDF，互轉 WebP、HEIC、JPEG、JPG，亦可一鍵生成透明
               PNG。全部在你的裝置內完成，檔案不會離開瀏覽器。
             </p>
           </div>
@@ -1020,9 +991,8 @@ export default function Home() {
                       支援轉換
                     </div>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      HEIC / HEIF 和 JPC（JPEG
-                      2000）可作來源，輸出為瀏覽器通用格式。選「透明
-                      PNG」會自動按邊緣背景色去背。
+                      HEIC / HEIF 可作來源，輸出為瀏覽器通用格式。選「透明
+                      PNG」會自動按邊緣背景色去背，並保護與背景色相近的主體細節。
                     </p>
                   </div>
                 </div>
@@ -1045,7 +1015,9 @@ export default function Home() {
                     {mode === 'compress'
                       ? '拖放檔案到這裡'
                       : mode === 'convert'
-                        ? `加入 ${conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片'}`
+                        ? convertFrom === 'auto'
+                          ? '加入圖片檔案'
+                          : `加入 ${conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片'}`
                         : '預覽你的 QR Code'}
                   </h2>
                 </div>
@@ -1165,7 +1137,7 @@ export default function Home() {
                   <p className="mt-4 text-xs text-muted-foreground">
                     {mode === 'compress'
                       ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案'
-                      : `支援 ${conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片'}・可一次加入多個檔案`}
+                      : `支援 ${convertFrom === 'auto' ? 'WebP、HEIC、JPEG/JPG、PNG' : (conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片')}・可一次加入多個檔案`}
                   </p>
                 </div>
               )}
