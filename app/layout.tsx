@@ -13,6 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://ya-sai-di.davidlui.chatgpt.site'),
   title: '壓細啲｜免費 PDF 及圖片壓縮工具',
   description:
     '在瀏覽器內壓縮 PDF、JPEG、JPG、PNG、WebP，或無損互換 JPEG 與 JPG 副檔名。檔案不會上傳。',
@@ -22,6 +23,7 @@ export const metadata: Metadata = {
       '免費壓縮 PDF 及圖片，並可無損互換 JPEG 與 JPG。全部在瀏覽器內處理。',
     type: 'website',
     locale: 'zh_HK',
+    url: 'https://ya-sai-di.davidlui.chatgpt.site',
     images: [
       {
         url: '/og.png',
