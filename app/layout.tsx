@@ -14,11 +14,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://ya-sai-di.davidlui.chatgpt.site'),
-  title: '你有壓力我有壓力，轉一轉世界更美妙｜壓細啲',
+  title: '你有壓力我有壓力，轉一轉世界更美妙。｜壓細啲',
   description:
-    '在瀏覽器內壓縮 PDF 及圖片，互轉 JPEG、JPG、WebP，HEIC 亦可轉成常用圖片格式。亦支援網頁 QR Code。檔案不會上傳。',
+    '在瀏覽器內壓縮 PDF 及圖片，互轉 JPEG、JPG、HEIC、WebP。亦支援網頁 QR Code。檔案不會上傳。',
   openGraph: {
-    title: '你有壓力我有壓力，轉一轉世界更美妙',
+    title: '你有壓力我有壓力，轉一轉世界更美妙。',
     description:
       '免費壓縮 PDF 及圖片，轉換 JPEG、JPG、WebP 和 HEIC，亦可生成網頁 QR Code。全部在瀏覽器內處理。',
     type: 'website',
@@ -35,7 +35,7 @@ export const metadata: Metadata = {
   },
   twitter: {
     card: 'summary_large_image',
-    title: '你有壓力我有壓力，轉一轉世界更美妙',
+    title: '你有壓力我有壓力，轉一轉世界更美妙。',
     description: '免費壓縮及轉換 PDF、圖片，檔案不會上傳。',
     images: ['/og.png'],
   },

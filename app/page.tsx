@@ -36,8 +36,8 @@ import { Progress } from '@/components/ui/progress';
 type ToolMode = 'compress' | 'convert' | 'qr';
 type PresetKey = 'clear' | 'balanced' | 'smallest';
 type FileStatus = 'ready' | 'processing' | 'done' | 'error';
-type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg' | 'png';
-type ConversionTarget = 'jpeg' | 'jpg' | 'webp';
+type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg';
+type ConversionTarget = 'jpeg' | 'jpg' | 'heic' | 'webp';
 
 type QueueItem = {
   id: string;
@@ -94,7 +94,7 @@ const conversionSourceOptions: Array<{
   {
     value: 'auto',
     label: '自動偵測',
-    accept: '.webp,.heic,.heif,.jpeg,.jpg,.png',
+    accept: '.webp,.heic,.heif,.jpeg,.jpg',
   },
   { value: 'webp', label: 'WebP', accept: '.webp,image/webp' },
   {
@@ -103,7 +103,6 @@ const conversionSourceOptions: Array<{
     accept: '.heic,.heif,image/heic,image/heif',
   },
   { value: 'jpeg', label: 'JPEG / JPG', accept: '.jpeg,.jpg,image/jpeg' },
-  { value: 'png', label: 'PNG', accept: '.png,image/png' },
 ];
 
 const conversionTargetOptions: Array<{
@@ -113,6 +112,7 @@ const conversionTargetOptions: Array<{
 }> = [
   { value: 'jpeg', label: 'JPEG', description: '相片通用格式' },
   { value: 'jpg', label: 'JPG', description: '與 JPEG 內容相同' },
+  { value: 'heic', label: 'HEIC', description: '容量較細，適合手機相片' },
   { value: 'webp', label: 'WebP', description: '容量較細，適合網頁' },
 ];
 
@@ -152,8 +152,7 @@ function isSupportedConversionFile(file: File) {
   return (
     isJpegFile(file) ||
     isHeicFile(file) ||
-    supportedImageTypes.has(file.type) ||
-    extensionOf(file.name) === 'png' ||
+    file.type === 'image/webp' ||
     extensionOf(file.name) === 'webp'
   );
 }
@@ -164,7 +163,7 @@ function matchesConversionSource(file: File, source: ConversionSource) {
     return file.type === 'image/webp' || extensionOf(file.name) === 'webp';
   if (source === 'heic') return isHeicFile(file);
   if (source === 'jpeg') return isJpegFile(file);
-  return file.type === 'image/png' || extensionOf(file.name) === 'png';
+  return false;
 }
 
 function isPdfFile(file: File) {
@@ -187,6 +186,34 @@ async function canvasToBlob(
       quality,
     );
   });
+}
+
+async function canvasToHeicBlob(canvas: HTMLCanvasElement) {
+  const [{ heic }, wasmModule] = await Promise.all([
+    import('@pbk20191/icodec'),
+    import('@pbk20191/icodec/heic-enc.wasm?url'),
+  ]);
+  await heic.loadEncoder(wasmModule.default);
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('你的瀏覽器未能建立 HEIC 轉換畫布');
+  const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+  const encoded = heic.encode(
+    {
+      data: imageData.data,
+      width: imageData.width,
+      height: imageData.height,
+      depth: 8,
+    },
+    {
+      quality: 78,
+      preset: 'fast',
+      tune: 'ssim',
+      chroma: '420',
+    },
+  );
+  const bytes = new Uint8Array(encoded.length);
+  bytes.set(encoded);
+  return new Blob([bytes.buffer as ArrayBuffer], { type: 'image/heic' });
 }
 
 async function imageBitmapFromFile(file: File) {
@@ -287,9 +314,14 @@ async function convertImage(file: File, target: ConversionTarget) {
   context.drawImage(bitmap, 0, 0);
   bitmap.close();
 
-  const outputType = target === 'webp' ? 'image/webp' : 'image/jpeg';
-  const quality = 0.9;
-  const blob = await canvasToBlob(canvas, outputType, quality);
+  const blob =
+    target === 'heic'
+      ? await canvasToHeicBlob(canvas)
+      : await canvasToBlob(
+          canvas,
+          target === 'webp' ? 'image/webp' : 'image/jpeg',
+          0.9,
+        );
   canvas.width = 1;
   canvas.height = 1;
   return { blob, name: outputName };
@@ -622,12 +654,12 @@ export default function Home() {
             <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] sm:text-5xl lg:text-[58px] lg:leading-[1.02]">
               你有壓力我有壓力，
               <span className="text-[color:var(--brand)]">
-                轉一轉世界更美妙
+                轉一轉世界更美妙。
               </span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              壓縮相片和 PDF，互轉 JPEG、JPG、WebP，HEIC 亦可轉成常用圖片格式。
-              全部在你的裝置內完成，檔案不會離開瀏覽器。
+              壓縮相片和 PDF，互轉
+              JPEG、JPG、HEIC、WebP。全部在你的裝置內完成，檔案不會離開瀏覽器。
             </p>
           </div>
           <div className="hidden gap-8 rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] px-6 py-4 lg:flex">
@@ -863,8 +895,8 @@ export default function Home() {
                       支援轉換
                     </div>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      HEIC / HEIF 可作來源，輸出為 JPEG、JPG 或 WebP；JPEG 與
-                      JPG 只會更改副檔名，不會重新壓縮。
+                      HEIC / HEIF 可作來源，輸出為 JPEG、JPG、HEIC 或 WebP；JPEG
+                      與 JPG 只會更改副檔名，不會重新壓縮。
                     </p>
                   </div>
                 </div>
@@ -1008,8 +1040,8 @@ export default function Home() {
                   </Button>
                   <p className="mt-4 text-xs text-muted-foreground">
                     {mode === 'compress'
-                      ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案'
-                      : `支援 ${convertFrom === 'auto' ? 'WebP、HEIC、JPEG/JPG、PNG' : (conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片')}・可一次加入多個檔案`}
+                      ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案（沒有硬性數量上限）'
+                      : `支援 ${convertFrom === 'auto' ? 'WebP、HEIC、JPEG/JPG' : (conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片')}・可一次加入多個檔案`}
                   </p>
                 </div>
               )}
