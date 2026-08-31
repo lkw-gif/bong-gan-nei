@@ -610,14 +610,14 @@ export default function Home() {
           <a
             href="#top"
             className="flex items-center gap-3"
-            aria-label="壓細啲首頁"
+            aria-label="幫緊你幫緊你～首頁"
           >
             <span className="logo-mark">
               <ArrowDownToLine className="size-5" aria-hidden="true" />
             </span>
             <span>
               <span className="block text-[17px] font-bold leading-none tracking-tight">
-                壓細啲
+                幫緊你幫緊你～
               </span>
               <span className="mt-1 block text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
                 File compressor
@@ -652,7 +652,10 @@ export default function Home() {
               </span>
             </div>
             <h1 className="text-balance text-4xl font-bold tracking-[-0.045em] sm:text-5xl lg:text-[58px] lg:leading-[1.02]">
-              <span className="text-[color:var(--brand)]">幫緊你幫緊你～</span>
+              你有壓力我有壓力，
+              <span className="text-[color:var(--brand)]">
+                轉一轉世界更美妙。
+              </span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
               壓縮相片和 PDF，互轉
@@ -1191,7 +1194,7 @@ export default function Home() {
 
       <footer className="border-t border-[color:var(--line)] bg-[color:var(--paper)]">
         <div className="mx-auto flex max-w-7xl flex-col gap-2 px-5 py-6 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:px-8">
-          <p>壓細啲・簡單、私隱、即用。</p>
+          <p>幫緊你幫緊你～・簡單、私隱、即用。</p>
           <p>處理效果會因檔案內容及原本壓縮程度而異。</p>
         </div>
       </footer>

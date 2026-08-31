@@ -14,11 +14,11 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://bong-gan-nei.davidlui.chatgpt.site'),
-  title: '幫緊你幫緊你～｜壓細啲',
+  title: '你有壓力我有壓力，轉一轉世界更美妙。｜幫緊你幫緊你～',
   description:
     '在瀏覽器內壓縮 PDF 及圖片，互轉 JPEG、JPG、HEIC、WebP。亦支援網頁 QR Code。檔案不會上傳。',
   openGraph: {
-    title: '幫緊你幫緊你～',
+    title: '你有壓力我有壓力，轉一轉世界更美妙。',
     description:
       '免費壓縮 PDF 及圖片，轉換 JPEG、JPG、WebP 和 HEIC，亦可生成網頁 QR Code。全部在瀏覽器內處理。',
     type: 'website',
@@ -29,13 +29,13 @@ export const metadata: Metadata = {
         url: '/og.png',
         width: 1200,
         height: 630,
-        alt: '壓細啲檔案壓縮工具',
+        alt: '幫緊你幫緊你～檔案壓縮工具',
       },
     ],
   },
   twitter: {
     card: 'summary_large_image',
-    title: '幫緊你幫緊你～',
+    title: '你有壓力我有壓力，轉一轉世界更美妙。',
     description: '免費壓縮及轉換 PDF、圖片，檔案不會上傳。',
     images: ['/og.png'],
   },
