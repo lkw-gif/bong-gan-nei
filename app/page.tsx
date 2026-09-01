@@ -1,9 +1,5 @@
 'use client';
 
-// The tool is entirely browser-local, so the page can be pre-rendered for
-// static hosts such as GitHub Pages.
-export const dynamic = 'force-static';
-
 import { useEffect, useRef, useState } from 'react';
 import {
   ArrowDownToLine,
