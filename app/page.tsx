@@ -37,7 +37,7 @@ type ToolMode = 'compress' | 'convert' | 'qr' | 'docpdf';
 type PresetKey = 'clear' | 'balanced' | 'smallest';
 type FileStatus = 'ready' | 'processing' | 'done' | 'error';
 type ConversionSource = 'auto' | 'webp' | 'heic' | 'jpeg';
-type ConversionTarget = 'jpeg' | 'jpg' | 'heic' | 'webp';
+type ConversionTarget = 'jpeg' | 'jpg' | 'heic' | 'webp' | 'pdf';
 
 type QueueItem = {
   id: string;
@@ -112,6 +112,7 @@ const conversionTargetOptions: Array<{
 }> = [
   { value: 'jpeg', label: 'JPEG', description: '相片通用格式' },
   { value: 'jpg', label: 'JPG', description: '與 JPEG 內容相同' },
+  { value: 'pdf', label: 'PDF', description: '將每張相轉成 PDF' },
   { value: 'heic', label: 'HEIC', description: '容量較細，適合手機相片' },
   { value: 'webp', label: 'WebP', description: '容量較細，適合網頁' },
 ];
@@ -320,10 +321,34 @@ async function convertImage(file: File, target: ConversionTarget) {
   canvas.height = bitmap.height;
   const context = canvas.getContext('2d');
   if (!context) throw new Error('你的瀏覽器未能建立轉換畫布');
+  if (target === 'pdf') {
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+  }
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = 'high';
   context.drawImage(bitmap, 0, 0);
   bitmap.close();
+
+  if (target === 'pdf') {
+    const { jsPDF } = await import('jspdf');
+    const orientation = canvas.width > canvas.height ? 'landscape' : 'portrait';
+    const pdf = new jsPDF({
+      unit: 'px',
+      format: [canvas.width, canvas.height],
+      orientation,
+      compress: true,
+      hotfixes: ['px_scaling'],
+    });
+    pdf.addImage(canvas, 'JPEG', 0, 0, canvas.width, canvas.height, undefined, 'FAST');
+    canvas.width = 1;
+    canvas.height = 1;
+    return {
+      blob: pdf.output('blob'),
+      name: `${nameWithoutExtension(file.name)}.pdf`,
+      note: '已將這張相轉成單頁 PDF。',
+    };
+  }
 
   const blob =
     target === 'heic'
@@ -894,8 +919,8 @@ export default function Home() {
               </span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              壓縮相片和 PDF，互轉 JPEG、JPG、HEIC、WebP，DOC / DOCX 轉
-              PDF，網頁秒變QR code。
+              壓縮相片和 PDF，互轉 JPEG、JPG、HEIC、WebP，圖片可轉 PDF，
+              DOC / DOCX 轉 PDF，網頁秒變QR code。
             </p>
           </div>
           <div className="hidden gap-8 rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] px-6 py-4 lg:flex">
@@ -1164,9 +1189,9 @@ export default function Home() {
                       支援轉換
                     </div>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      HEIC / HEIF 可作圖片來源，輸出為 JPEG、JPG、HEIC 或 WebP。
-                      JPEG 與 JPG 只會更改副檔名，不會重新壓縮；DOC／DOCX
-                      請使用旁邊的「DOC → PDF」功能。
+                      HEIC / HEIF 可作圖片來源，輸出為 JPEG、JPG、PDF、HEIC 或
+                      WebP。JPEG 與 JPG 只會更改副檔名，不會重新壓縮；每張相會
+                      各自轉成一份 PDF。DOC／DOCX 請使用旁邊的「DOC → PDF」功能。
                     </p>
                   </div>
                 </div>
@@ -1317,7 +1342,7 @@ export default function Home() {
                       ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案（沒有硬性數量上限）'
                       : mode === 'docpdf'
                         ? '支援 DOC、DOCX・可一次加入多個檔案（沒有硬性數量上限）'
-                        : `支援 ${convertFrom === 'auto' ? 'WebP、HEIC、JPEG/JPG' : (conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片')}・可一次加入多個檔案`}
+                        : `支援 ${convertFrom === 'auto' ? 'WebP、HEIC、JPEG/JPG' : (conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片')}・可一次加入多個檔案${convertTo === 'pdf' ? '（每張相會各自轉成 PDF）' : ''}`}
                   </p>
                 </div>
               )}
