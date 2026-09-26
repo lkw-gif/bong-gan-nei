@@ -8,6 +8,8 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Eye,
+  Square,
   FileArchive,
   FileImage,
   FileText,
@@ -24,6 +26,15 @@ import {
   X,
 } from 'lucide-react';
 
+import wordToolUrl from '@/native/Word-to-PDF.exe?url';
+import wordToolSource from '@/native/WordToPdf.cs?raw';
+import { PdfPreview } from '@/components/pdf-preview';
+import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -372,92 +383,6 @@ async function convertImage(file: File, target: ConversionTarget) {
   return { blob, name: outputName };
 }
 
-type OfficeDocumentAst = {
-  toText?: () => string;
-  toMarkdown?: () => string;
-};
-
-type OfficeParserBrowser = {
-  parseOffice: (
-    input: ArrayBuffer,
-    config?: Record<string, unknown>,
-  ) => Promise<OfficeDocumentAst>;
-};
-
-let officeParserPromise: Promise<OfficeParserBrowser> | undefined;
-
-async function loadOfficeParser() {
-  if (!officeParserPromise) {
-    officeParserPromise = (async () => {
-      const module =
-        await import('@jose.espana/docstream/dist/officeparser.browser.js?url');
-      const global = globalThis as typeof globalThis & {
-        officeParser?: OfficeParserBrowser;
-      };
-      const existing = document.querySelector<HTMLScriptElement>(
-        'script[data-office-parser="true"]',
-      );
-
-      if (!global.officeParser) {
-        await new Promise<void>((resolve, reject) => {
-          const script = existing ?? document.createElement('script');
-          if (!existing) {
-            script.dataset.officeParser = 'true';
-            script.src = module.default;
-            script.async = true;
-            document.head.appendChild(script);
-          }
-          script.addEventListener('load', () => resolve(), { once: true });
-          script.addEventListener(
-            'error',
-            () => reject(new Error('未能載入 DOC 文件轉換器')),
-            { once: true },
-          );
-        });
-      }
-
-      if (!global.officeParser?.parseOffice) {
-        throw new Error('未能載入 DOC 文件轉換器');
-      }
-      return global.officeParser;
-    })().catch((error) => {
-      officeParserPromise = undefined;
-      throw error;
-    });
-  }
-  return officeParserPromise;
-}
-
-function escapeHtml(value: string) {
-  return value
-    .replaceAll('&', '&amp;')
-    .replaceAll('<', '&lt;')
-    .replaceAll('>', '&gt;')
-    .replaceAll('"', '&quot;')
-    .replaceAll("'", '&#039;');
-}
-
-function plainTextToHtml(text: string) {
-  const blocks = text
-    .replace(/\r\n?/g, '\n')
-    .split(/\n{2,}/)
-    .map((block) => block.trim())
-    .filter(Boolean)
-    .map((block) => `<p>${escapeHtml(block).replaceAll('\n', '<br />')}</p>`);
-  return blocks.join('') || '<p>（文件沒有可顯示內容）</p>';
-}
-
-async function legacyWordDocumentToHtml(file: File) {
-  const source = await file.arrayBuffer();
-  const parser = await loadOfficeParser();
-  const ast = await parser.parseOffice(source);
-  const text = ast.toText?.() ?? ast.toMarkdown?.() ?? '';
-  return {
-    html: plainTextToHtml(text),
-    note: '舊式 DOC 只能提取文字，原有版面未能保留；如需較準確格式，請先在 Word 另存為 DOCX。',
-  };
-}
-
 async function convertDocxToPdf(
   file: File,
   onProgress: (progress: number) => void,
@@ -511,9 +436,9 @@ async function convertDocxToPdf(
         image.complete
           ? Promise.resolve()
           : new Promise<void>((resolve) => {
-            image.addEventListener('load', () => resolve(), { once: true });
-            image.addEventListener('error', () => resolve(), { once: true });
-          }),
+              image.addEventListener('load', () => resolve(), { once: true });
+              image.addEventListener('error', () => resolve(), { once: true });
+            }),
       ),
     );
 
@@ -634,128 +559,6 @@ async function convertDocxToPdf(
   }
 }
 
-async function convertLegacyDocToPdf(
-  file: File,
-  onProgress: (progress: number) => void,
-) {
-  const [{ default: html2canvas }, jspdf] = await Promise.all([
-    import('html2canvas'),
-    import('jspdf'),
-  ]);
-  const documentContent = await legacyWordDocumentToHtml(file);
-  const container = document.createElement('div');
-  container.style.position = 'fixed';
-  container.style.left = '-100000px';
-  container.style.top = '0';
-  container.style.width = '794px';
-  container.style.boxSizing = 'border-box';
-  container.style.padding = '52px';
-  container.style.background = '#ffffff';
-  container.style.color = '#111827';
-  container.style.fontFamily = 'Arial, "Noto Sans TC", sans-serif';
-  container.style.fontSize = '15px';
-  container.style.lineHeight = '1.65';
-  container.innerHTML = `
-    <style>
-      * { box-sizing: border-box; }
-      h1, h2, h3, h4, h5, h6 { margin: 0 0 14px; line-height: 1.25; }
-      p { margin: 0 0 12px; }
-      ul, ol { margin: 0 0 12px; padding-left: 28px; }
-      table { width: 100%; border-collapse: collapse; margin: 0 0 16px; }
-      td, th { border: 1px solid #d1d5db; padding: 6px 8px; vertical-align: top; }
-      img { max-width: 100%; height: auto; }
-      a { color: #075b50; text-decoration: underline; }
-    </style>
-    <main>${documentContent.html}</main>
-  `;
-  document.body.appendChild(container);
-
-  try {
-    await document.fonts?.ready;
-    const capture = await html2canvas(container, {
-      backgroundColor: '#ffffff',
-      scale: 2,
-      useCORS: true,
-      logging: false,
-    });
-    const pageWidth = 210;
-    const pageHeight = 297;
-    const margin = 12;
-    const contentWidth = pageWidth - margin * 2;
-    const contentHeight = pageHeight - margin * 2;
-    const pixelsPerMillimetre = capture.width / contentWidth;
-    const pagePixelHeight = Math.max(
-      1,
-      Math.floor(contentHeight * pixelsPerMillimetre),
-    );
-    const pdf = new jspdf.jsPDF({
-      unit: 'mm',
-      format: 'a4',
-      orientation: 'portrait',
-      compress: true,
-    });
-
-    let offset = 0;
-    let pageIndex = 0;
-    while (offset < capture.height) {
-      const sliceHeight = Math.min(pagePixelHeight, capture.height - offset);
-      const pageCanvas = document.createElement('canvas');
-      pageCanvas.width = capture.width;
-      pageCanvas.height = sliceHeight;
-      const pageContext = pageCanvas.getContext('2d', { alpha: false });
-      if (!pageContext) throw new Error('你的瀏覽器未能建立 PDF 頁面');
-      pageContext.fillStyle = '#ffffff';
-      pageContext.fillRect(0, 0, pageCanvas.width, pageCanvas.height);
-      pageContext.drawImage(
-        capture,
-        0,
-        offset,
-        capture.width,
-        sliceHeight,
-        0,
-        0,
-        pageCanvas.width,
-        pageCanvas.height,
-      );
-
-      if (pageIndex > 0) pdf.addPage('a4', 'portrait');
-      pdf.addImage(
-        pageCanvas.toDataURL('image/jpeg', 0.92),
-        'JPEG',
-        margin,
-        margin,
-        contentWidth,
-        sliceHeight / pixelsPerMillimetre,
-        undefined,
-        'FAST',
-      );
-      pageCanvas.width = 1;
-      pageCanvas.height = 1;
-      offset += sliceHeight;
-      pageIndex += 1;
-      onProgress(Math.min(98, Math.round((offset / capture.height) * 98)));
-    }
-
-    onProgress(100);
-    return {
-      blob: pdf.output('blob'),
-      name: `${nameWithoutExtension(file.name)}.pdf`,
-      note: documentContent.note,
-    };
-  } finally {
-    container.remove();
-  }
-}
-
-async function convertWordToPdf(
-  file: File,
-  onProgress: (progress: number) => void,
-) {
-  return extensionOf(file.name) === 'docx'
-    ? convertDocxToPdf(file, onProgress)
-    : convertLegacyDocToPdf(file, onProgress);
-}
-
 async function compressPdf(
   file: File,
   preset: (typeof presets)[PresetKey],
@@ -841,6 +644,15 @@ export default function Home() {
   const [convertFrom, setConvertFrom] = useState<ConversionSource>('auto');
   const [convertTo, setConvertTo] = useState<ConversionTarget>('jpeg');
   const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [wordMethod, setWordMethod] = useState<'native' | 'browser'>('native');
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isZipping, setIsZipping] = useState(false);
+  const [fileMessage, setFileMessage] = useState('');
+  const [preview, setPreview] = useState<QueueItem | null>(null);
+  const [previewUrl, setPreviewUrl] = useState('');
+  const runningRef = useRef(false);
+  const stopRef = useRef(false);
+  const queuesRef = useRef<Partial<Record<ToolMode, QueueItem[]>>>({});
   const [dragging, setDragging] = useState(false);
   const [qrInput, setQrInput] = useState('');
   const [qrUrl, setQrUrl] = useState('');
@@ -848,6 +660,13 @@ export default function Home() {
   const [qrError, setQrError] = useState('');
   const [copied, setCopied] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!preview?.output) return;
+    const url = URL.createObjectURL(preview.output);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [preview]);
 
   useEffect(() => {
     const trimmed = qrInput.trim();
@@ -900,44 +719,64 @@ export default function Home() {
     };
   }, [qrInput]);
 
-  const readyCount = queue.filter((item) => item.status === 'ready').length;
+  const readyCount = queue.filter(
+    (item) => item.status === 'ready' || item.status === 'error',
+  ).length;
   const doneItems = queue.filter(
     (item): item is QueueItem & { output: Blob; outputName: string } =>
       item.status === 'done' && Boolean(item.output && item.outputName),
   );
   function changeMode(nextMode: ToolMode) {
+    if (runningRef.current || nextMode === mode) return;
+    queuesRef.current[mode] = queue;
     setMode(nextMode);
-    setQueue([]);
+    setQueue(queuesRef.current[nextMode] ?? []);
+    setFileMessage('');
   }
 
   function addFiles(fileList: FileList | File[]) {
-    const incoming = Array.from(fileList);
-    const accepted = incoming.filter((file) => {
-      if (mode === 'convert') return matchesConversionSource(file, convertFrom);
-      if (mode === 'docpdf') return isWordFile(file);
-      return isPdfFile(file) || supportedImageTypes.has(file.type);
-    });
-
-    setQueue((current) => {
-      const signatures = new Set(
-        current.map(
-          (item) =>
-            `${item.file.name}-${item.file.size}-${item.file.lastModified}`,
-        ),
-      );
-      const fresh = accepted
-        .filter(
-          (file) =>
-            !signatures.has(`${file.name}-${file.size}-${file.lastModified}`),
-        )
-        .map((file) => ({
-          id: makeId(file),
-          file,
-          status: 'ready' as const,
-          progress: 0,
-        }));
-      return [...current, ...fresh];
-    });
+    if (runningRef.current) return;
+    const signatures = new Set(
+      queue.map(
+        (item) =>
+          `${item.file.name}-${item.file.size}-${item.file.lastModified}`,
+      ),
+    );
+    const fresh: QueueItem[] = [];
+    let rejected = 0;
+    let duplicate = 0;
+    for (const file of Array.from(fileList)) {
+      const supported =
+        mode === 'convert'
+          ? matchesConversionSource(file, convertFrom)
+          : mode === 'docpdf'
+            ? extensionOf(file.name) === 'docx'
+            : isPdfFile(file) ||
+              supportedImageTypes.has(file.type) ||
+              /\.(jpe?g|png|webp)$/i.test(file.name);
+      if (!supported || !file.size) {
+        rejected++;
+        continue;
+      }
+      const signature = `${file.name}-${file.size}-${file.lastModified}`;
+      if (signatures.has(signature)) {
+        duplicate++;
+        continue;
+      }
+      signatures.add(signature);
+      fresh.push({ id: makeId(file), file, status: 'ready', progress: 0 });
+    }
+    setQueue((current) => [...current, ...fresh]);
+    setFileMessage(
+      [
+        rejected
+          ? `${rejected} 個檔案未加入（格式不支援或檔案為空）${mode === 'docpdf' ? '；舊式 DOC 請用原格式工具' : ''}。`
+          : '',
+        duplicate ? `已略過 ${duplicate} 個重複檔案。` : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    );
   }
 
   function updateItem(id: string, patch: Partial<QueueItem>) {
@@ -955,7 +794,7 @@ export default function Home() {
 
     try {
       if (mode === 'docpdf') {
-        const result = await convertWordToPdf(item.file, (progress) =>
+        const result = await convertDocxToPdf(item.file, (progress) =>
           updateItem(item.id, { progress }),
         );
         updateItem(item.id, {
@@ -1002,33 +841,113 @@ export default function Home() {
         status: 'error',
         progress: 0,
         error:
-          error instanceof Error ? error.message : '處理失敗，請再試一次。',
+          mode === 'docpdf'
+            ? '未能讀取這份 DOCX。請確認文件未損壞或加密，亦可改用 Word 原格式批次工具。'
+            : error instanceof Error
+              ? error.message
+              : '處理失敗，請再試一次。',
       });
     }
   }
 
   async function processAll() {
-    const pending = queue.filter(
-      (item) => item.status === 'ready' || item.status === 'error',
-    );
-    for (const item of pending) await processItem(item);
+    if (runningRef.current) return;
+    runningRef.current = true;
+    stopRef.current = false;
+    setIsProcessing(true);
+    try {
+      const pending = queue.filter(
+        (item) => item.status === 'ready' || item.status === 'error',
+      );
+      for (const item of pending) {
+        if (stopRef.current) break;
+        await processItem(item);
+      }
+    } finally {
+      runningRef.current = false;
+      setIsProcessing(false);
+    }
   }
 
-  function download(item: QueueItem & { output: Blob; outputName: string }) {
-    const url = URL.createObjectURL(item.output);
+  function saveBlob(blob: Blob, name: string) {
+    const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = item.outputName;
+    anchor.download = name;
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    window.setTimeout(() => URL.revokeObjectURL(url), 60000);
   }
 
-  function downloadAll() {
-    doneItems.forEach((item, index) => {
-      window.setTimeout(() => download(item), index * 180);
-    });
+  function download(item: QueueItem & { output: Blob; outputName: string }) {
+    saveBlob(item.output, item.outputName);
+  }
+
+  async function downloadAll() {
+    if (isZipping) return;
+    setIsZipping(true);
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const used = new Set<string>();
+      for (const item of doneItems) {
+        const original = item.outputName.replace(/[\\\\/]/g, '_');
+        const dot = original.lastIndexOf('.');
+        const stem = dot > 0 ? original.slice(0, dot) : original;
+        const ext = dot > 0 ? original.slice(dot) : '';
+        let name = original;
+        let index = 2;
+        while (used.has(name.toLowerCase()))
+          name = `${stem} (${index++})${ext}`;
+        used.add(name.toLowerCase());
+        zip.file(name, await item.output.arrayBuffer());
+      }
+      saveBlob(
+        await zip.generateAsync({ type: 'blob' }),
+        '幫緊你-處理結果.zip',
+      );
+    } catch {
+      setFileMessage('暫時未能打包 ZIP，請逐個下載或再試一次。');
+    } finally {
+      setIsZipping(false);
+    }
+  }
+
+  async function downloadWordTool() {
+    try {
+      const { default: JSZip } = await import('jszip');
+      const zip = new JSZip();
+      const response = await fetch(wordToolUrl);
+      if (!response.ok) throw new Error('Tool download failed');
+      zip.file('Word-to-PDF.exe', await response.blob());
+      zip.file('source/WordToPdf.cs', wordToolSource);
+      zip.file(
+        '使用方法.txt',
+        '\uFEFF' +
+          [
+            '幫緊你：原格式批次 Word 轉 PDF',
+            '',
+            '適用：Windows，並已安裝及啟用 Microsoft Word 桌面版。',
+            '1. 將 ZIP 全部解壓縮到一個資料夾。',
+            '2. 雙擊 Word-to-PDF.exe，選取一個或多個 DOC / DOCX 文件。',
+            '3. 選擇儲存位置，等待完成。',
+            '',
+            '使用 Word 自己的 PDF 匯出功能，保留表格、分頁和可選取文字。',
+            '不會上傳檔案、不會啟用文件巨集，也不會修改原檔或覆蓋已有 PDF。',
+            '每批另附 CSV 成功／失敗報告。缺少原文件字型仍可能影響版面。',
+            '工具未有程式碼簽署，Windows 或機構政策可能限制執行；如被封鎖請向管理員查詢，毋須停用安全防護。',
+            '附有 C# 原始碼供查閱。缺少原文件字型仍可能影響版面。',
+            'Mac 用家可在 Word 選擇「檔案 → 另存新檔 → PDF」。',
+          ].join('\r\n'),
+      );
+      saveBlob(
+        await zip.generateAsync({ type: 'blob' }),
+        'Word-原格式批次轉PDF.zip',
+      );
+    } catch {
+      setFileMessage('未能下載批次工具，請再試一次。');
+    }
   }
 
   function downloadQr() {
@@ -1074,7 +993,7 @@ export default function Home() {
               className="size-4 text-[color:var(--brand)]"
               aria-hidden="true"
             />
-            檔案只在你的瀏覽器處理
+            檔案留在你的裝置
           </div>
           <Badge className="border-[color:var(--brand)]/20 bg-[color:var(--mint)] text-[color:var(--brand-deep)] sm:hidden">
             私隱優先
@@ -1123,6 +1042,7 @@ export default function Home() {
               <button
                 type="button"
                 role="tab"
+                disabled={isProcessing}
                 aria-selected={mode === 'compress'}
                 className={mode === 'compress' ? 'active' : ''}
                 onClick={() => changeMode('compress')}
@@ -1132,6 +1052,7 @@ export default function Home() {
               <button
                 type="button"
                 role="tab"
+                disabled={isProcessing}
                 aria-selected={mode === 'convert'}
                 className={mode === 'convert' ? 'active' : ''}
                 onClick={() => changeMode('convert')}
@@ -1141,6 +1062,7 @@ export default function Home() {
               <button
                 type="button"
                 role="tab"
+                disabled={isProcessing}
                 aria-selected={mode === 'qr'}
                 className={mode === 'qr' ? 'active' : ''}
                 onClick={() => changeMode('qr')}
@@ -1150,6 +1072,7 @@ export default function Home() {
               <button
                 type="button"
                 role="tab"
+                disabled={isProcessing}
                 aria-selected={mode === 'docpdf'}
                 className={mode === 'docpdf' ? 'active' : ''}
                 onClick={() => changeMode('docpdf')}
@@ -1160,7 +1083,10 @@ export default function Home() {
           </div>
 
           <div className="grid lg:grid-cols-[330px_minmax(0,1fr)]">
-            <aside className="border-b border-[color:var(--line)] bg-[color:var(--panel)] p-5 sm:p-6 lg:border-b-0 lg:border-r">
+            <aside
+              inert={isProcessing}
+              className="border-b border-[color:var(--line)] bg-[color:var(--panel)] p-5 sm:p-6 lg:border-b-0 lg:border-r"
+            >
               <div className="mb-6">
                 <p className="eyebrow">01 / 設定</p>
                 <h2 className="mt-2 text-xl font-bold tracking-tight">
@@ -1178,7 +1104,7 @@ export default function Home() {
                     : mode === 'convert'
                       ? '先揀「由格式」和「轉做」，再加入相片；所有轉換都在瀏覽器內完成。'
                       : mode === 'docpdf'
-                        ? '可一次加入多個 DOC／DOCX 文件，轉換會在瀏覽器內完成。'
+                        ? '選擇適合文件的轉換方式；表格、工作紙和正式文件建議用原格式工具。'
                         : '貼上網址後會即時生成 QR Code，可下載 PNG 圖片。'}
                 </p>
               </div>
@@ -1232,21 +1158,31 @@ export default function Home() {
                 </div>
               ) : mode === 'docpdf' ? (
                 <div className="space-y-4">
-                  <div className="rounded-2xl border border-[color:var(--brand)]/15 bg-[color:var(--mint)]/45 p-4">
-                    <div className="mb-2 flex items-center gap-2 text-sm font-semibold text-[color:var(--brand-deep)]">
-                      <FileText className="size-4" aria-hidden="true" />
-                      直接轉換
-                    </div>
-                    <p className="text-xs leading-5 text-muted-foreground">
-                      支援 DOC 及 DOCX。可一次選取多個文件，完成後會逐個下載
-                      PDF。
-                    </p>
-                  </div>
-                  <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] p-4 text-xs leading-5 text-muted-foreground">
-                    DOCX 會盡量保留原本頁面方向、邊距及表格；舊式 DOC
-                    只可保留文字，建議先在 Word 另存為 DOCX。輸出的 PDF
-                    是圖片頁，文字未必可以搜尋或複製；重要文件請保留原檔。
-                  </div>
+                  <label
+                    htmlFor="word-method"
+                    className="block text-sm font-semibold"
+                  >
+                    轉換方式
+                  </label>
+                  <NativeSelect
+                    id="word-method"
+                    value={wordMethod}
+                    onChange={(event) =>
+                      setWordMethod(event.target.value as 'native' | 'browser')
+                    }
+                  >
+                    <NativeSelectOption value="native">
+                      原格式批次工具（Windows + Word）
+                    </NativeSelectOption>
+                    <NativeSelectOption value="browser">
+                      網頁快速轉換（只限 DOCX）
+                    </NativeSelectOption>
+                  </NativeSelect>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {wordMethod === 'native'
+                      ? '直接使用電腦上的 Microsoft Word 另存 PDF，保留原有表格、頁面方向、分頁和可選取文字。需要已安裝 Word 桌面版。'
+                      : '免安裝，適合簡單文件。網頁重新繪製 DOCX，表格、字型及分頁可能走位；PDF 會是圖片頁。請先預覽核對。'}
+                  </p>
                 </div>
               ) : mode === 'compress' ? (
                 <>
@@ -1385,7 +1321,7 @@ export default function Home() {
                   className="mt-0.5 size-4 shrink-0 text-[color:var(--brand)]"
                   aria-hidden="true"
                 />
-                不用登入，不會儲存檔案。關閉頁面後，所有處理結果即會消失。
+                不用登入，檔案不會上傳。網頁內的結果請在關閉分頁前下載。
               </div>
             </aside>
 
@@ -1401,14 +1337,20 @@ export default function Home() {
                           ? '加入圖片檔案'
                           : `加入 ${conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片'}`
                         : mode === 'docpdf'
-                          ? '加入 DOC／DOCX 文件'
+                          ? wordMethod === 'native'
+                            ? '用 Word 批次另存 PDF'
+                            : '加入 DOCX 文件'
                           : '預覽你的 QR Code'}
                   </h2>
                 </div>
                 {queue.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => setQueue([])}
+                    disabled={isProcessing}
+                    onClick={() => {
+                      setQueue([]);
+                      setFileMessage('');
+                    }}
                     className="inline-flex items-center gap-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
                   >
                     <Trash2 className="size-3.5" aria-hidden="true" /> 清除全部
@@ -1416,7 +1358,45 @@ export default function Home() {
                 )}
               </div>
 
-              {mode === 'qr' ? (
+              {fileMessage && (
+                <p role="status" className="mb-4 text-sm text-muted-foreground">
+                  {fileMessage}
+                </p>
+              )}
+              {mode === 'docpdf' && wordMethod === 'native' ? (
+                <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] p-6 sm:p-8">
+                  <FileText
+                    className="mb-4 size-10 text-[color:var(--brand)]"
+                    aria-hidden="true"
+                  />
+                  <h3 className="text-lg font-bold">沿用 Word 原本的排版</h3>
+                  <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                    適合有表格、頁首／頁尾、中文字型和精確分頁的文件。DOC 和
+                    DOCX 都可一次處理多份。
+                  </p>
+                  <ol className="my-6 list-decimal space-y-3 pl-5 text-sm leading-6">
+                    <li>下載 ZIP，將整個資料夾解壓縮。</li>
+                    <li>
+                      雙擊 <strong>Word-to-PDF.exe</strong>，一次選取多份 Word
+                      文件。
+                    </li>
+                    <li>選擇 PDF 儲存位置，等待批次完成。</li>
+                  </ol>
+                  <Button onClick={downloadWordTool} size="lg">
+                    <Download data-icon="inline-start" />
+                    下載原格式批次工具
+                  </Button>
+                  <p className="mt-4 text-xs leading-5 text-muted-foreground">
+                    Windows + 已安裝及啟用的 Microsoft Word
+                    桌面版。工具會在你的電腦執行，不會修改原檔或覆蓋已有
+                    PDF。工具未有程式碼簽署；如電腦限制執行，請向管理員查詢，毋須停用安全防護。
+                  </p>
+                  <p className="mt-3 text-xs leading-5 text-muted-foreground">
+                    Mac：在 Word 使用「檔案 → 另存新檔 → PDF」。未安裝
+                    Word？可在左邊改用網頁快速轉換，但版面可能有差異。
+                  </p>
+                </div>
+              ) : mode === 'qr' ? (
                 <div className="qr-workspace">
                   <div className={`qr-preview ${qrDataUrl ? 'ready' : ''}`}>
                     {qrDataUrl ? (
@@ -1489,6 +1469,7 @@ export default function Home() {
                 >
                   <input
                     ref={inputRef}
+                    disabled={isProcessing}
                     type="file"
                     className="sr-only"
                     multiple
@@ -1496,7 +1477,7 @@ export default function Home() {
                       mode === 'compress'
                         ? '.pdf,.jpeg,.jpg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp'
                         : mode === 'docpdf'
-                          ? '.doc,.docx,application/msword,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+                          ? '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document'
                           : conversionSourceOptions.find(
                               (option) => option.value === convertFrom,
                             )?.accept
@@ -1516,6 +1497,7 @@ export default function Home() {
                   <Button
                     size="lg"
                     className="mt-4 h-11 rounded-xl bg-[color:var(--brand)] px-5 text-white hover:bg-[color:var(--brand-deep)]"
+                    disabled={isProcessing}
                     onClick={() => inputRef.current?.click()}
                   >
                     選擇檔案 <ChevronRight data-icon="inline-end" />
@@ -1524,158 +1506,209 @@ export default function Home() {
                     {mode === 'compress'
                       ? '支援 PDF、JPEG、JPG、PNG、WebP・可一次加入多個檔案（沒有硬性數量上限）'
                       : mode === 'docpdf'
-                        ? '支援 DOC、DOCX・可一次加入多個檔案（沒有硬性數量上限）'
+                        ? '支援 DOCX・可一次加入多份・DOC 請用原格式批次工具'
                         : `支援 ${convertFrom === 'auto' ? 'WebP、HEIC、JPEG/JPG' : (conversionSourceOptions.find((option) => option.value === convertFrom)?.label ?? '圖片')}・可一次加入多個檔案${convertTo === 'pdf' ? '（每張相會各自轉成 PDF）' : ''}`}
                   </p>
                 </div>
               )}
 
-              {mode !== 'qr' && queue.length > 0 && (
-                <div className="mt-6" aria-live="polite">
-                  <div className="mb-3 flex items-center justify-between">
-                    <p className="text-sm font-bold">
-                      待處理檔案{' '}
-                      <span className="font-normal text-muted-foreground">
-                        ({queue.length})
-                      </span>
-                    </p>
-                    {doneItems.length > 1 && (
-                      <Button variant="outline" size="sm" onClick={downloadAll}>
-                        <Download data-icon="inline-start" /> 下載全部
-                      </Button>
-                    )}
-                  </div>
-                  <div className="space-y-2">
-                    {queue.map((item) => {
-                      const saving = item.outputSize
-                        ? Math.max(
-                            0,
-                            Math.round(
-                              (1 - item.outputSize / item.file.size) * 100,
-                            ),
-                          )
-                        : 0;
-                      return (
-                        <div key={item.id} className="file-row">
-                          <div className="file-icon">
-                            <FileTypeIcon file={item.file} />
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2">
-                              <p className="truncate text-sm font-semibold">
-                                {item.file.name}
-                              </p>
-                              {item.status === 'done' &&
-                                mode === 'compress' &&
-                                saving > 0 && (
-                                  <Badge className="shrink-0 bg-[color:var(--mint)] text-[color:var(--brand-deep)]">
-                                    細咗 {saving}%
-                                  </Badge>
+              {mode !== 'qr' &&
+                !(mode === 'docpdf' && wordMethod === 'native') &&
+                queue.length > 0 && (
+                  <div className="mt-6" aria-live="polite">
+                    <div className="mb-3 flex items-center justify-between">
+                      <p className="text-sm font-bold">
+                        待處理檔案{' '}
+                        <span className="font-normal text-muted-foreground">
+                          ({queue.length})
+                        </span>
+                      </p>
+                      {doneItems.length > 1 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={isZipping}
+                          onClick={downloadAll}
+                        >
+                          <Download data-icon="inline-start" />{' '}
+                          {isZipping ? '打包中…' : '下載全部 ZIP'}
+                        </Button>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      {queue.map((item) => {
+                        const saving = item.outputSize
+                          ? Math.max(
+                              0,
+                              Math.round(
+                                (1 - item.outputSize / item.file.size) * 100,
+                              ),
+                            )
+                          : 0;
+                        return (
+                          <div key={item.id} className="file-row">
+                            <div className="file-icon">
+                              <FileTypeIcon file={item.file} />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <p className="truncate text-sm font-semibold">
+                                  {item.file.name}
+                                </p>
+                                {item.status === 'done' &&
+                                  mode === 'compress' &&
+                                  saving > 0 && (
+                                    <Badge className="shrink-0 bg-[color:var(--mint)] text-[color:var(--brand-deep)]">
+                                      細咗 {saving}%
+                                    </Badge>
+                                  )}
+                              </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
+                                <span>{formatBytes(item.file.size)}</span>
+                                {item.outputSize !== undefined && (
+                                  <>
+                                    <span>→</span>
+                                    <span className="font-semibold text-foreground">
+                                      {formatBytes(item.outputSize)}
+                                    </span>
+                                  </>
                                 )}
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                              <span>{formatBytes(item.file.size)}</span>
-                              {item.outputSize !== undefined && (
-                                <>
-                                  <span>→</span>
-                                  <span className="font-semibold text-foreground">
-                                    {formatBytes(item.outputSize)}
+                                {item.error && (
+                                  <span className="text-destructive">
+                                    {item.error}
                                   </span>
-                                </>
+                                )}
+                              </div>
+                              {item.status === 'processing' && (
+                                <Progress
+                                  value={item.progress}
+                                  className="mt-2 max-w-sm"
+                                />
                               )}
-                              {item.error && (
-                                <span className="text-destructive">
-                                  {item.error}
-                                </span>
+                              {item.note && (
+                                <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
+                                  {item.note}
+                                </p>
                               )}
                             </div>
-                            {item.status === 'processing' && (
-                              <Progress
-                                value={item.progress}
-                                className="mt-2 max-w-sm"
-                              />
-                            )}
-                            {item.note && (
-                              <p className="mt-1.5 text-[11px] leading-4 text-muted-foreground">
-                                {item.note}
-                              </p>
-                            )}
-                          </div>
-                          <div className="flex shrink-0 items-center gap-1">
-                            {item.status === 'processing' && (
-                              <LoaderCircle
-                                className="size-4 animate-spin text-[color:var(--brand)]"
-                                aria-label="處理中"
-                              />
-                            )}
-                            {item.status === 'done' &&
-                              item.output &&
-                              item.outputName && (
+                            <div className="flex shrink-0 items-center gap-1">
+                              {item.status === 'processing' && (
+                                <LoaderCircle
+                                  className="size-4 animate-spin text-[color:var(--brand)]"
+                                  aria-label="處理中"
+                                />
+                              )}
+                              {item.status === 'done' &&
+                                item.output &&
+                                item.outputName && (
+                                  <Button
+                                    size="sm"
+                                    className="bg-[color:var(--brand)] text-white hover:bg-[color:var(--brand-deep)]"
+                                    onClick={() =>
+                                      download(
+                                        item as QueueItem & {
+                                          output: Blob;
+                                          outputName: string;
+                                        },
+                                      )
+                                    }
+                                  >
+                                    <Download data-icon="inline-start" />{' '}
+                                    <span className="hidden sm:inline">
+                                      下載
+                                    </span>
+                                  </Button>
+                                )}
+                              {item.status === 'done' &&
+                                item.output &&
+                                (item.output.type === 'application/pdf' ||
+                                  /^image\/(jpeg|png|webp)$/.test(
+                                    item.output.type,
+                                  )) && (
+                                  <Button
+                                    variant="outline"
+                                    size="icon-sm"
+                                    aria-label={`預覽 ${item.outputName}`}
+                                    onClick={() => setPreview(item)}
+                                  >
+                                    <Eye />
+                                  </Button>
+                                )}
+                              {item.status !== 'processing' && (
                                 <Button
-                                  size="sm"
-                                  className="bg-[color:var(--brand)] text-white hover:bg-[color:var(--brand-deep)]"
+                                  variant="ghost"
+                                  size="icon-sm"
+                                  disabled={isProcessing}
+                                  aria-label={`移除 ${item.file.name}`}
                                   onClick={() =>
-                                    download(
-                                      item as QueueItem & {
-                                        output: Blob;
-                                        outputName: string;
-                                      },
+                                    setQueue((current) =>
+                                      current.filter(
+                                        (entry) => entry.id !== item.id,
+                                      ),
                                     )
                                   }
                                 >
-                                  <Download data-icon="inline-start" />{' '}
-                                  <span className="hidden sm:inline">下載</span>
+                                  <X />
                                 </Button>
                               )}
-                            {item.status !== 'processing' && (
-                              <Button
-                                variant="ghost"
-                                size="icon-sm"
-                                aria-label={`移除 ${item.file.name}`}
-                                onClick={() =>
-                                  setQueue((current) =>
-                                    current.filter(
-                                      (entry) => entry.id !== item.id,
-                                    ),
-                                  )
-                                }
-                              >
-                                <X />
-                              </Button>
-                            )}
+                            </div>
                           </div>
-                        </div>
-                      );
-                    })}
-                  </div>
+                        );
+                      })}
+                    </div>
 
-                  {readyCount > 0 && (
-                    <Button
-                      size="lg"
-                      onClick={processAll}
-                      className="mt-5 h-12 w-full rounded-xl bg-[color:var(--brand)] text-base font-bold text-white shadow-[0_8px_24px_rgba(7,91,80,0.18)] hover:bg-[color:var(--brand-deep)]"
-                    >
-                      {mode === 'compress'
-                        ? `開始壓縮 ${readyCount} 個檔案`
-                        : mode === 'docpdf'
-                          ? `轉換 ${readyCount} 個 DOC／DOCX 文件`
-                          : `轉換 ${readyCount} 個檔案`}{' '}
-                      <ArrowDownToLine data-icon="inline-end" />
-                    </Button>
-                  )}
-                </div>
-              )}
+                    {isProcessing && (
+                      <div
+                        className="mt-4 flex items-center justify-between gap-3 text-sm"
+                        role="status"
+                      >
+                        <span>
+                          已完成 {doneItems.length} / {queue.length} 個
+                        </span>
+                        <Button
+                          variant="outline"
+                          onClick={() => {
+                            stopRef.current = true;
+                            setFileMessage(
+                              '會在目前檔案完成後停止，其餘檔案保留待處理。',
+                            );
+                          }}
+                        >
+                          <Square data-icon="inline-start" />
+                          完成此檔後停止
+                        </Button>
+                      </div>
+                    )}
+                    {readyCount > 0 && (
+                      <Button
+                        size="lg"
+                        disabled={isProcessing}
+                        onClick={processAll}
+                        className="mt-5 h-12 w-full rounded-xl bg-[color:var(--brand)] text-base font-bold text-white shadow-[0_8px_24px_rgba(7,91,80,0.18)] hover:bg-[color:var(--brand-deep)]"
+                      >
+                        {mode === 'compress'
+                          ? `壓縮／重試 ${readyCount} 個檔案`
+                          : mode === 'docpdf'
+                            ? `轉換／重試 ${readyCount} 個 DOCX 文件`
+                            : `轉換／重試 ${readyCount} 個檔案`}{' '}
+                        <ArrowDownToLine data-icon="inline-end" />
+                      </Button>
+                    )}
+                  </div>
+                )}
             </div>
           </div>
         </div>
 
-        <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">
-          <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <p>
-            <strong>關於 PDF：</strong>
-            壓縮時會把每頁重新渲染成圖片，因此文字搜尋、複製、表格選取及可點擊連結可能不再保留。重要文件請保留原檔。
-          </p>
-        </div>
+        {mode === 'compress' && (
+          <div className="mt-5 flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-950">
+            <Info className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+            <p>
+              <strong>關於 PDF：</strong>
+              壓縮時會把每頁重新渲染成圖片，因此文字搜尋、複製、表格選取及可點擊連結可能不再保留。重要文件請保留原檔。
+            </p>
+          </div>
+        )}
       </section>
 
       <footer className="border-t border-[color:var(--line)] bg-[color:var(--paper)]">
@@ -1684,6 +1717,36 @@ export default function Home() {
           <p>處理效果會因檔案內容及原本壓縮程度而異。</p>
         </div>
       </footer>
+      <Dialog
+        open={Boolean(preview)}
+        onOpenChange={(open) => {
+          if (!open) setPreview(null);
+        }}
+      >
+        <DialogContent className="w-[95vw] sm:max-w-5xl">
+          <DialogTitle>{preview?.outputName ?? '檔案預覽'}</DialogTitle>
+          <DialogDescription>先核對版面和內容，再下載檔案。</DialogDescription>
+          {preview?.output?.type === 'application/pdf' ? (
+            <PdfPreview key={preview.id} blob={preview.output} />
+          ) : (
+            <img
+              src={previewUrl}
+              alt={preview?.outputName ?? '轉換結果'}
+              className="max-h-[70vh] w-full object-contain"
+            />
+          )}
+          <Button
+            onClick={() => {
+              if (preview?.output && preview.outputName)
+                download(
+                  preview as QueueItem & { output: Blob; outputName: string },
+                );
+            }}
+          >
+            下載此檔案
+          </Button>
+        </DialogContent>
+      </Dialog>
     </main>
   );
 }
