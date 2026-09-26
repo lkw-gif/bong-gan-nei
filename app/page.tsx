@@ -340,7 +340,16 @@ async function convertImage(file: File, target: ConversionTarget) {
       compress: true,
       hotfixes: ['px_scaling'],
     });
-    pdf.addImage(canvas, 'JPEG', 0, 0, canvas.width, canvas.height, undefined, 'FAST');
+    pdf.addImage(
+      canvas,
+      'JPEG',
+      0,
+      0,
+      canvas.width,
+      canvas.height,
+      undefined,
+      'FAST',
+    );
     canvas.width = 1;
     canvas.height = 1;
     return {
@@ -438,31 +447,194 @@ function plainTextToHtml(text: string) {
   return blocks.join('') || '<p>（文件沒有可顯示內容）</p>';
 }
 
-async function wordDocumentToHtml(file: File) {
+async function legacyWordDocumentToHtml(file: File) {
   const source = await file.arrayBuffer();
-  if (extensionOf(file.name) === 'docx') {
-    const mammothModule = await import('mammoth');
-    const mammoth = mammothModule.default ?? mammothModule;
-    const result = await mammoth.convertToHtml(
-      { arrayBuffer: source },
-      { convertImage: mammoth.images.dataUri },
-    );
-    return {
-      html: result.value || '<p>（文件沒有可顯示內容）</p>',
-      note: 'DOCX 已在瀏覽器內轉成 PDF；複雜版面可能會略有不同。',
-    };
-  }
-
   const parser = await loadOfficeParser();
   const ast = await parser.parseOffice(source);
   const text = ast.toText?.() ?? ast.toMarkdown?.() ?? '';
   return {
     html: plainTextToHtml(text),
-    note: 'DOC 已在瀏覽器內轉成 PDF；舊式 Word 的複雜版面可能會略有不同。',
+    note: '舊式 DOC 只能提取文字，原有版面未能保留；如需較準確格式，請先在 Word 另存為 DOCX。',
   };
 }
 
-async function convertWordToPdf(
+async function convertDocxToPdf(
+  file: File,
+  onProgress: (progress: number) => void,
+) {
+  const [{ renderAsync }, { default: html2canvas }, { jsPDF }] =
+    await Promise.all([
+      import('docx-preview'),
+      import('html2canvas'),
+      import('jspdf'),
+    ]);
+  const frame = document.createElement('iframe');
+  frame.setAttribute('aria-hidden', 'true');
+  frame.style.position = 'fixed';
+  frame.style.left = '-100000px';
+  frame.style.top = '0';
+  frame.style.width = '1600px';
+  frame.style.height = '1600px';
+  frame.style.border = '0';
+  frame.srcdoc =
+    '<!doctype html><html><head></head><body style="margin:0;background:#fff"></body></html>';
+  document.body.appendChild(frame);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      frame.addEventListener('load', () => resolve(), { once: true });
+      frame.addEventListener(
+        'error',
+        () => reject(new Error('未能準備 Word 預覽')),
+        {
+          once: true,
+        },
+      );
+    });
+    const frameDocument = frame.contentDocument;
+    if (!frameDocument) throw new Error('未能讀取 Word 預覽');
+    const container = frameDocument.createElement('div');
+    frameDocument.body.appendChild(container);
+    await renderAsync(file, container, frameDocument.head, {
+      inWrapper: false,
+      breakPages: true,
+      ignoreLastRenderedPageBreak: false,
+      ignoreWidth: false,
+      ignoreHeight: false,
+      ignoreFonts: false,
+      renderHeaders: true,
+      renderFooters: true,
+    });
+    await frameDocument.fonts?.ready;
+    await Promise.all(
+      Array.from(container.querySelectorAll('img')).map((image) =>
+        image.complete
+          ? Promise.resolve()
+          : new Promise<void>((resolve) => {
+            image.addEventListener('load', () => resolve(), { once: true });
+            image.addEventListener('error', () => resolve(), { once: true });
+          }),
+      ),
+    );
+
+    const pages = Array.from(
+      container.querySelectorAll<HTMLElement>('section.docx'),
+    );
+    if (!pages.length) throw new Error('Word 文件沒有可轉換的頁面');
+    let pdf: InstanceType<typeof jsPDF> | undefined;
+    let completedPages = 0;
+    for (const [index, page] of pages.entries()) {
+      const widthPx = page.getBoundingClientRect().width;
+      const minimumHeightPx = Number.parseFloat(
+        frameDocument.defaultView!.getComputedStyle(page).minHeight,
+      );
+      const heightPx = Number.isFinite(minimumHeightPx)
+        ? minimumHeightPx
+        : page.getBoundingClientRect().height;
+      if (!widthPx || !heightPx) throw new Error('未能讀取 Word 頁面尺寸');
+      const pageRect = page.getBoundingClientRect();
+      const totalHeightPx = Math.max(heightPx, page.scrollHeight);
+      const topMarginPx =
+        Number.parseFloat(
+          frameDocument.defaultView!.getComputedStyle(page).paddingTop,
+        ) || 0;
+      const bottomMarginPx =
+        Number.parseFloat(
+          frameDocument.defaultView!.getComputedStyle(page).paddingBottom,
+        ) || 0;
+      const rowBreaks = Array.from(page.querySelectorAll('tr'))
+        .map((row) => row.getBoundingClientRect().bottom - pageRect.top)
+        .filter((y) => y > 0 && y < totalHeightPx)
+        .sort((a, b) => a - b);
+      // CSS uses 96 px/in; jsPDF uses millimetres. Keep each Word page's
+      // size and orientation instead of forcing every document into A4 portrait.
+      const widthMm = (widthPx * 25.4) / 96;
+      const heightMm = (heightPx * 25.4) / 96;
+      const canvas = await html2canvas(page, {
+        backgroundColor: '#ffffff',
+        scale: 2,
+        width: Math.ceil(widthPx),
+        height: Math.ceil(totalHeightPx),
+        useCORS: true,
+        logging: false,
+      });
+      const scale = canvas.width / widthPx;
+      let offset = 0;
+      while (offset < totalHeightPx - 1) {
+        const destinationTopPx = offset > 0 ? topMarginPx : 0;
+        const availableHeightPx = heightPx - destinationTopPx - bottomMarginPx;
+        const idealEnd = Math.min(totalHeightPx, offset + availableHeightPx);
+        // Word tables should continue on a new page between rows, never
+        // through the middle of a cell. If no row ends nearby, use the page edge.
+        const rowEnd = rowBreaks
+          .filter((y) => y > offset + availableHeightPx * 0.6 && y <= idealEnd)
+          .at(-1);
+        const end = idealEnd < totalHeightPx ? (rowEnd ?? idealEnd) : idealEnd;
+        const slice = frameDocument.createElement('canvas');
+        slice.width = canvas.width;
+        slice.height = Math.max(1, Math.round((end - offset) * scale));
+        const context = slice.getContext('2d', { alpha: false });
+        if (!context) throw new Error('你的瀏覽器未能建立 PDF 頁面');
+        context.fillStyle = '#ffffff';
+        context.fillRect(0, 0, slice.width, slice.height);
+        context.drawImage(
+          canvas,
+          0,
+          Math.round(offset * scale),
+          canvas.width,
+          slice.height,
+          0,
+          0,
+          slice.width,
+          slice.height,
+        );
+        if (!pdf) {
+          pdf = new jsPDF({
+            unit: 'mm',
+            format: [widthMm, heightMm],
+            orientation: widthMm > heightMm ? 'landscape' : 'portrait',
+            compress: true,
+          });
+        } else {
+          pdf.addPage(
+            [widthMm, heightMm],
+            widthMm > heightMm ? 'landscape' : 'portrait',
+          );
+        }
+        pdf.addImage(
+          slice.toDataURL('image/jpeg', 0.9),
+          'JPEG',
+          0,
+          (destinationTopPx * 25.4) / 96,
+          widthMm,
+          ((end - offset) * 25.4) / 96,
+          undefined,
+          'FAST',
+        );
+        slice.width = 1;
+        slice.height = 1;
+        offset = end;
+        completedPages += 1;
+      }
+      canvas.width = 1;
+      canvas.height = 1;
+      onProgress(Math.min(99, Math.round(((index + 1) / pages.length) * 99)));
+    }
+
+    if (!completedPages) throw new Error('Word 文件沒有可轉換的頁面');
+    onProgress(100);
+
+    return {
+      blob: pdf!.output('blob'),
+      name: `${nameWithoutExtension(file.name)}.pdf`,
+      note: '已依照 DOCX 的頁面方向、邊距及表格格式轉成 PDF；極複雜的 Word 功能仍可能有差異。',
+    };
+  } finally {
+    frame.remove();
+  }
+}
+
+async function convertLegacyDocToPdf(
   file: File,
   onProgress: (progress: number) => void,
 ) {
@@ -470,7 +642,7 @@ async function convertWordToPdf(
     import('html2canvas'),
     import('jspdf'),
   ]);
-  const documentContent = await wordDocumentToHtml(file);
+  const documentContent = await legacyWordDocumentToHtml(file);
   const container = document.createElement('div');
   container.style.position = 'fixed';
   container.style.left = '-100000px';
@@ -573,6 +745,15 @@ async function convertWordToPdf(
   } finally {
     container.remove();
   }
+}
+
+async function convertWordToPdf(
+  file: File,
+  onProgress: (progress: number) => void,
+) {
+  return extensionOf(file.name) === 'docx'
+    ? convertDocxToPdf(file, onProgress)
+    : convertLegacyDocToPdf(file, onProgress);
 }
 
 async function compressPdf(
@@ -919,8 +1100,8 @@ export default function Home() {
               </span>
             </h1>
             <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground sm:text-lg">
-              壓縮相片和 PDF，互轉 JPEG、JPG、HEIC、WebP，圖片可轉 PDF，
-              DOC / DOCX 轉 PDF，網頁秒變QR code。
+              壓縮相片和 PDF，互轉 JPEG、JPG、HEIC、WebP，圖片可轉 PDF， DOC /
+              DOCX 轉 PDF，網頁秒變QR code。
             </p>
           </div>
           <div className="hidden gap-8 rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] px-6 py-4 lg:flex">
@@ -1062,8 +1243,9 @@ export default function Home() {
                     </p>
                   </div>
                   <div className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--paper)] p-4 text-xs leading-5 text-muted-foreground">
-                    舊式 DOC 或複雜 Word
-                    版面，轉換後可能會有少量差異；重要文件請保留原檔。
+                    DOCX 會盡量保留原本頁面方向、邊距及表格；舊式 DOC
+                    只可保留文字，建議先在 Word 另存為 DOCX。輸出的 PDF
+                    是圖片頁，文字未必可以搜尋或複製；重要文件請保留原檔。
                   </div>
                 </div>
               ) : mode === 'compress' ? (
@@ -1191,7 +1373,8 @@ export default function Home() {
                     <p className="text-xs leading-5 text-muted-foreground">
                       HEIC / HEIF 可作圖片來源，輸出為 JPEG、JPG、PDF、HEIC 或
                       WebP。JPEG 與 JPG 只會更改副檔名，不會重新壓縮；每張相會
-                      各自轉成一份 PDF。DOC／DOCX 請使用旁邊的「DOC → PDF」功能。
+                      各自轉成一份 PDF。DOC／DOCX 請使用旁邊的「DOC →
+                      PDF」功能。
                     </p>
                   </div>
                 </div>
